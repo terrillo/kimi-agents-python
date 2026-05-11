@@ -73,6 +73,23 @@ class ToolDef(_Base):
 
 
 class Message(_Base):
+    """A single chat message in the conversation history.
+
+    Multi-turn footgun for thinking models: when an assistant turn comes back
+    with ``reasoning_content`` set, you **must** include that field verbatim
+    when echoing the assistant message back in the next request's ``messages``
+    list. Dropping it makes Moonshot return an opaque HTTP 400.
+
+    This applies to:
+
+    * ``kimi-k2.6`` with ``thinking={"type": "enabled", "keep": "all"}``
+    * ``kimi-k2-thinking`` and ``kimi-k2-thinking-turbo`` (always-on thinking)
+
+    :func:`run_tools` / :func:`arun_tools` already handle this for you;
+    hand-built message lists need to copy ``reasoning_content`` along with
+    ``role``, ``content``, and ``tool_calls``.
+    """
+
     role: Role
     content: str | list[ContentPart] | None = None
     name: str | None = None

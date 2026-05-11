@@ -139,6 +139,33 @@ print("answer:", msg.content)
 
 `keep="all"` preserves prior reasoning across multi-turn conversations (k2.6 only).
 
+### Multi-turn footgun: echo `reasoning_content` back
+
+When a thinking model returns `reasoning_content`, you **must** copy that field into the assistant message you send back on the next turn. Drop it and Moonshot returns an opaque HTTP 400 — the SDK won't catch this for you. Applies to:
+
+- `kimi-k2.6` with `thinking={"type": "enabled", "keep": "all"}`
+- `kimi-k2-thinking` and `kimi-k2-thinking-turbo` (always-on thinking)
+
+```python
+response = client.chat.create(model=Model.KIMI_K2_6, messages=messages,
+                              thinking={"type": "enabled", "keep": "all"},
+                              max_tokens=16000)
+msg = response.choices[0].message
+
+messages.append({
+    "role": "assistant",
+    "content": msg.content,
+    "reasoning_content": msg.reasoning_content,  # required — do not drop
+})
+messages.append({"role": "user", "content": "follow-up question"})
+
+response = client.chat.create(model=Model.KIMI_K2_6, messages=messages,
+                              thinking={"type": "enabled", "keep": "all"},
+                              max_tokens=16000)
+```
+
+`run_tools` / `arun_tools` handle this automatically — the footgun only bites callers who build the message history by hand.
+
 ## Tool calling
 
 ```python
