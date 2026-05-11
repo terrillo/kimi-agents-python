@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from kimi_agents_python import MODEL_SPECS, Model, ModelSpec, get_model_spec
+from kimi_agents_python import (
+    MODEL_SPECS,
+    Model,
+    ModelSpec,
+    ThinkingIncompatibilityError,
+    get_model_spec,
+)
 
 
 def test_every_model_enum_value_has_a_spec() -> None:
@@ -136,3 +142,67 @@ def test_families() -> None:
     assert MODEL_SPECS[Model.KIMI_K2_THINKING].family == "kimi-k2-thinking"
     assert MODEL_SPECS[Model.MOONSHOT_V1_8K].family == "moonshot-v1"
     assert MODEL_SPECS[Model.MOONSHOT_V1_8K_VISION_PREVIEW].family == "moonshot-v1-vision"
+
+
+# --- tool_choice + thinking ---------------------------------------------------
+
+
+def test_k26_rejects_tool_choice_required_when_thinking_enabled() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_6]
+    with pytest.raises(ThinkingIncompatibilityError, match="tool_choice='required'"):
+        spec.validate_params(
+            {"tool_choice": "required", "thinking": {"type": "enabled"}}
+        )
+
+
+def test_k26_allows_tool_choice_required_when_thinking_omitted() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_6]
+    spec.validate_params({"tool_choice": "required"})
+
+
+def test_k26_allows_tool_choice_required_when_thinking_disabled() -> None:
+    """Explicit thinking={'type': 'disabled'} → tool_choice='required' is fine."""
+    spec = MODEL_SPECS[Model.KIMI_K2_6]
+    spec.validate_params(
+        {"tool_choice": "required", "thinking": {"type": "disabled"}}
+    )
+
+
+def test_k2_thinking_always_rejects_tool_choice_required() -> None:
+    """Always-on thinking models reject 'required' unconditionally."""
+    spec = MODEL_SPECS[Model.KIMI_K2_THINKING]
+    with pytest.raises(ThinkingIncompatibilityError, match="always-on"):
+        spec.validate_params({"tool_choice": "required", "max_tokens": 16_000})
+
+
+def test_k2_thinking_turbo_shares_tool_choice_rule() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_THINKING_TURBO]
+    with pytest.raises(ThinkingIncompatibilityError):
+        spec.validate_params({"tool_choice": "required", "max_tokens": 16_000})
+
+
+def test_non_thinking_model_allows_tool_choice_required() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_0905_PREVIEW]
+    spec.validate_params({"tool_choice": "required"})
+
+
+def test_tool_choice_auto_never_triggers_thinking_check() -> None:
+    """Only the literal 'required' is rejected; 'auto' is fine everywhere."""
+    spec = MODEL_SPECS[Model.KIMI_K2_THINKING]
+    spec.validate_params({"tool_choice": "auto", "max_tokens": 16_000})
+
+
+def test_thinking_incompatibility_is_a_value_error() -> None:
+    """Existing `except ValueError` blocks still catch the new subclass."""
+    spec = MODEL_SPECS[Model.KIMI_K2_6]
+    with pytest.raises(ValueError):
+        spec.validate_params(
+            {"tool_choice": "required", "thinking": {"type": "enabled"}}
+        )
+
+
+def test_tool_choice_enum_includes_required() -> None:
+    """Without this, pydantic would reject tool_choice='required' before our check fires."""
+    from kimi_agents_python import ToolChoice
+
+    assert ToolChoice.REQUIRED.value == "required"

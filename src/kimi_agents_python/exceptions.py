@@ -29,6 +29,17 @@ class RepeatedToolCallError(KimiToolLoopError):
     """Same (tool name, arguments) appeared N times in a row — likely a stuck loop."""
 
 
+class ThinkingIncompatibilityError(ValueError):
+    """A chat() parameter is incompatible with thinking mode on this model.
+
+    Raised by :meth:`ModelSpec.validate_params` *before* any HTTP call when a
+    server-rejected combination is detected client-side (e.g. ``tool_choice=
+    "required"`` while thinking is enabled). Inherits ``ValueError`` so
+    existing ``except ValueError`` blocks still match — catch this class
+    specifically when you want to react to the thinking-mode case alone.
+    """
+
+
 class KimiAPIError(KimiError):
     def __init__(
         self,

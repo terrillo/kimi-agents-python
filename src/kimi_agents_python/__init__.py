@@ -50,6 +50,7 @@ from .exceptions import (
     RepeatedToolCallError,
     ResourceNotFoundError,
     ServerErrorResponse,
+    ThinkingIncompatibilityError,
     TokenBudgetExceededError,
     UnexpectedOutputError,
 )
@@ -173,6 +174,7 @@ __all__ = [
     "StreamOptions",
     "TextPart",
     "ThinkingConfig",
+    "ThinkingIncompatibilityError",
     "ThinkingMode",
     "ThinkingSupport",
     "TokenBudgetExceededError",

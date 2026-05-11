@@ -447,7 +447,24 @@ except RateLimitReachedError:
     ...
 ```
 
-Client-side spec violations raise plain `ValueError` *before* any HTTP call.
+Client-side spec violations raise `ValueError` *before* any HTTP call.
+
+One subclass worth catching specifically: **`ThinkingIncompatibilityError`** (a `ValueError`) fires when a parameter clashes with thinking mode — currently `tool_choice="required"` while thinking is enabled. Moonshot otherwise responds with a generic 400 that takes a while to decode; this check surfaces the exact cause before the request leaves your machine.
+
+```python
+from kimi_agents_python import ThinkingIncompatibilityError
+
+try:
+    client.chat.create(
+        model=Model.KIMI_K2_6,
+        messages=[...],
+        thinking={"type": "enabled"},
+        tool_choice="required",   # rejected client-side
+        tools=[...],
+    )
+except ThinkingIncompatibilityError as e:
+    print(e)  # exact field combination + suggested fix
+```
 
 ## Auto-retry
 
@@ -533,7 +550,7 @@ uv run python examples/01_basic_chat.py
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 213 tests, <1s
+uv run pytest                      # 223 tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 

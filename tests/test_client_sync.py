@@ -269,6 +269,29 @@ def test_chat_accepts_max_tokens_alias() -> None:
     assert captured["body"]["max_tokens"] == 128
 
 
+def test_chat_accepts_tool_choice_required_end_to_end() -> None:
+    """tool_choice='required' must survive pydantic validation and reach the wire."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=completion_body())
+
+    with make_sync_client(handler) as client:
+        client.chat.create(
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "x"}],
+            tool_choice="required",
+            tools=[
+                {
+                    "type": "function",
+                    "function": {"name": "t", "parameters": {"type": "object"}},
+                }
+            ],
+        )
+    assert captured["body"]["tool_choice"] == "required"
+
+
 def test_context_manager_closes_owned_transport() -> None:
     with KimiClient(api_key="test-key") as client:
         assert client._http.is_closed is False

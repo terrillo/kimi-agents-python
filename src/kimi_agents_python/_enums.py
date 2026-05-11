@@ -51,6 +51,7 @@ class ResponseFormatType(StrEnum):
 class ToolChoice(StrEnum):
     AUTO = "auto"
     NONE = "none"
+    REQUIRED = "required"
 
 
 class FilePurpose(StrEnum):

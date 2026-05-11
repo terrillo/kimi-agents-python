@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._enums import Model, ThinkingSupport
+from ._enums import Model, ThinkingMode, ThinkingSupport, ToolChoice
+from .exceptions import ThinkingIncompatibilityError
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,7 @@ class ModelSpec:
         self._check_penalty(params)
         self._check_thinking(params)
         self._check_max_tokens(params)
+        self._check_tool_choice_with_thinking(params)
 
     def _check_locked(self, key: str, params: dict, locked: bool, default: float) -> None:
         if locked and key in params and params[key] != default:
@@ -108,6 +110,32 @@ class ModelSpec:
                 f"{self.id.value}: 'thinking' is always on for this model and "
                 f"cannot be configured."
             )
+
+    def _check_tool_choice_with_thinking(self, params: dict) -> None:
+        """Reject ``tool_choice="required"`` when thinking is effectively on.
+
+        Moonshot rejects this combination at the wire with a generic 400.
+        Catch it here so the user sees exactly what's wrong before the call.
+        """
+        if params.get("tool_choice") != ToolChoice.REQUIRED.value:
+            return
+        if self.thinking_support is ThinkingSupport.ALWAYS_ON:
+            raise ThinkingIncompatibilityError(
+                f"{self.id.value}: tool_choice='required' is not supported with "
+                f"thinking mode (always-on for this model). Use 'auto' or a "
+                f"specific function-name choice."
+            )
+        if self.thinking_support is ThinkingSupport.CONFIGURABLE:
+            thinking = params.get("thinking")
+            if (
+                isinstance(thinking, dict)
+                and thinking.get("type") == ThinkingMode.ENABLED.value
+            ):
+                raise ThinkingIncompatibilityError(
+                    f"{self.id.value}: tool_choice='required' is not supported "
+                    f"when thinking is enabled. Either disable thinking or change "
+                    f"tool_choice to 'auto' / a specific function-name choice."
+                )
 
 
 _K26_LOCKED = dict(
