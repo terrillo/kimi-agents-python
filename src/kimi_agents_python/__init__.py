@@ -49,6 +49,7 @@ from .exceptions import (
     UnexpectedOutputError,
 )
 from ._retry import DEFAULT_RETRY, NO_RETRY, RetryConfig
+from ._stats import CacheStats
 from .specs import MODEL_SPECS, ModelSpec, get_model_spec
 from .tools import KimiTool, arun_tools, kimi_tool, run_tools
 from .types import (
@@ -69,6 +70,7 @@ from .types import (
     Message,
     ModelInfo,
     ModelList,
+    PromptTokensDetails,
     ResponseFormat,
     StreamChoice,
     StreamOptions,
@@ -90,6 +92,7 @@ __all__ = [
     "BATCH_FORMATS",
     "BalanceData",
     "BalanceInfo",
+    "CacheStats",
     "ChatCompletion",
     "ChatCompletionChunk",
     "ChatCompletionRequest",
@@ -134,6 +137,7 @@ __all__ = [
     "ModelSpec",
     "NO_RETRY",
     "PermissionDeniedError",
+    "PromptTokensDetails",
     "RateLimitReachedError",
     "ResourceNotFoundError",
     "ResponseFormat",

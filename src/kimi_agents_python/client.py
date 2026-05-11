@@ -17,6 +17,7 @@ from ._http import (
     resolve_api_key,
 )
 from ._retry import DEFAULT_RETRY, RetryConfig, retry_async, retry_sync
+from ._stats import CacheStats
 from .specs import get_model_spec
 from .tools import KimiTool
 from .types import (
@@ -28,6 +29,7 @@ from .types import (
     ModelInfo,
     ModelList,
     TokenEstimate,
+    Usage,
 )
 
 _MessageInput = Message | dict[str, Any]
@@ -47,10 +49,13 @@ def _build_request_body(
     messages: Iterable[_MessageInput],
     stream: bool,
     extra: dict[str, Any],
+    default_cache_key: str | None = None,
 ) -> dict[str, Any]:
     spec = get_model_spec(model)
     if spec is not None:
         spec.validate_params(extra)
+    if default_cache_key is not None and "prompt_cache_key" not in extra:
+        extra = {**extra, "prompt_cache_key": default_cache_key}
     if extra.get("tools"):
         extra = {
             **extra,
@@ -84,6 +89,7 @@ class KimiClient:
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
         retries: int | RetryConfig | None = None,
+        prompt_cache_key: str | None = None,
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
@@ -94,6 +100,12 @@ class KimiClient:
             timeout=timeout,
         )
         self._retry = _resolve_retry(retries)
+        self._prompt_cache_key = prompt_cache_key
+        self.cache_stats = CacheStats()
+
+    def _record_usage(self, usage: Usage | None) -> None:
+        if usage is not None:
+            self.cache_stats.record(usage)
 
     def close(self) -> None:
         if self._owns_client:
@@ -139,12 +151,18 @@ class KimiClient:
         **params: Any,
     ) -> ChatCompletion | Iterator[ChatCompletionChunk]:
         body = _build_request_body(
-            model=model, messages=messages, stream=stream, extra=params
+            model=model,
+            messages=messages,
+            stream=stream,
+            extra=params,
+            default_cache_key=self._prompt_cache_key,
         )
         if stream:
             return self._stream_chat(body)
         response = self._request("POST", "/chat/completions", json=body)
-        return ChatCompletion.model_validate(response.json())
+        completion = ChatCompletion.model_validate(response.json())
+        self._record_usage(completion.usage)
+        return completion
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         def _do() -> httpx.Response:
@@ -179,7 +197,9 @@ class KimiClient:
                 chunk = parse_sse_line(line)
                 if chunk is None:
                     continue
-                yield ChatCompletionChunk.model_validate(chunk)
+                parsed = ChatCompletionChunk.model_validate(chunk)
+                self._record_usage(parsed.usage)
+                yield parsed
 
     def list_models(self) -> list[ModelInfo]:
         response = self._request("GET", "/models")
@@ -213,6 +233,7 @@ class AsyncKimiClient:
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.AsyncClient | None = None,
         retries: int | RetryConfig | None = None,
+        prompt_cache_key: str | None = None,
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
@@ -223,6 +244,12 @@ class AsyncKimiClient:
             timeout=timeout,
         )
         self._retry = _resolve_retry(retries)
+        self._prompt_cache_key = prompt_cache_key
+        self.cache_stats = CacheStats()
+
+    def _record_usage(self, usage: Usage | None) -> None:
+        if usage is not None:
+            self.cache_stats.record(usage)
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -268,12 +295,18 @@ class AsyncKimiClient:
         **params: Any,
     ) -> ChatCompletion | AsyncIterator[ChatCompletionChunk]:
         body = _build_request_body(
-            model=model, messages=messages, stream=stream, extra=params
+            model=model,
+            messages=messages,
+            stream=stream,
+            extra=params,
+            default_cache_key=self._prompt_cache_key,
         )
         if stream:
             return self._stream_chat(body)
         response = await self._request("POST", "/chat/completions", json=body)
-        return ChatCompletion.model_validate(response.json())
+        completion = ChatCompletion.model_validate(response.json())
+        self._record_usage(completion.usage)
+        return completion
 
     async def _request(
         self, method: str, path: str, **kwargs: Any
@@ -312,7 +345,9 @@ class AsyncKimiClient:
                 chunk = parse_sse_line(line)
                 if chunk is None:
                     continue
-                yield ChatCompletionChunk.model_validate(chunk)
+                parsed = ChatCompletionChunk.model_validate(chunk)
+                self._record_usage(parsed.usage)
+                yield parsed
 
     async def list_models(self) -> list[ModelInfo]:
         response = await self._request("GET", "/models")

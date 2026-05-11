@@ -120,11 +120,16 @@ class ChatCompletionRequest(_Base):
     thinking: ThinkingConfig | None = None
 
 
+class PromptTokensDetails(_Base):
+    cached_tokens: int | None = None
+
+
 class Usage(_Base):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
     cached_tokens: int | None = None
+    prompt_tokens_details: PromptTokensDetails | None = None
 
 
 class AssistantMessage(_Base):

@@ -1,6 +1,6 @@
 # kimi-agents-python
 
-A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients, streaming, model-aware parameter validation, typed exceptions, and file-format checks — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string.
+A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients, streaming, model-aware parameter validation, typed exceptions, auto-retry for transient failures, prompt-cache observability, and file-format checks — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string.
 
 ## Install
 
@@ -296,9 +296,54 @@ except RateLimitReachedError:
 
 Client-side spec violations raise plain `ValueError` *before* any HTTP call.
 
+## Auto-retry
+
+Both clients retry transient failures (HTTP 429, 5xx, and httpx transport errors) with exponential backoff and jitter. A numeric `Retry-After` header is honored when present. Defaults: 3 retries, 1 s initial delay, 30 s cap.
+
+```python
+from kimi_agents_python import KimiClient, RetryConfig
+
+KimiClient()                              # 3 retries (default)
+KimiClient(retries=5)                     # bump the count
+KimiClient(retries=0)                     # disable
+KimiClient(retries=RetryConfig(
+    max_retries=5,
+    initial_delay=2.0,
+    backoff_factor=2.0,
+    max_delay=60.0,
+    jitter=0.25,
+))
+```
+
+4xx errors other than 429 (auth, bad request, not found) are **not** retried — they surface immediately as the typed exception class.
+
+## Prompt caching
+
+`kimi-k2.*` models auto-cache prompt prefixes server-side. Pass a stable `prompt_cache_key` (a session id, task id, conversation id) to improve hit rate by routing similar prompts to the same cache shard. Each client tracks cumulative hits in `cache_stats`.
+
+```python
+from kimi_agents_python import KimiClient, Model
+
+with KimiClient(prompt_cache_key="user-42-session-7") as client:
+    for question in (...):
+        client.chat(model=Model.KIMI_K2_6, messages=[
+            {"role": "system", "content": SHARED_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ])
+
+    print(client.cache_stats)
+    # CacheStats(requests=3, prompt_tokens=2400, cached_tokens=1900)
+    print(f"hit rate: {client.cache_stats.hit_ratio:.1%}")  # "79.2%"
+```
+
+- A per-call `prompt_cache_key=...` overrides the client default.
+- `usage.prompt_tokens_details.cached_tokens` is parsed when present (k2 wire format); the older top-level `usage.cached_tokens` is used as a fallback.
+- For streaming, stats only tick if the call asks for usage: `stream_options={"include_usage": True}`.
+- `client.cache_stats.reset()` zeros the counters.
+
 ## Examples
 
-The [`examples/`](examples/) directory has 11 self-contained scripts, each under 60 lines:
+The [`examples/`](examples/) directory has 14 self-contained scripts, each under 60 lines:
 
 ```bash
 uv run python examples/01_basic_chat.py
@@ -317,12 +362,15 @@ uv run python examples/01_basic_chat.py
 | `09_helpers.py` | `list_models` / `estimate_tokens` / `balance` |
 | `10_file_validation.py` | Pre-upload checks (no API call) |
 | `11_error_handling.py` | Typed errors + client-side validation |
+| `12_kimi_tool_decorator.py` | `@kimi_tool` + `run_tools` auto-loop |
+| `13_auto_retry.py` | `RetryConfig` for transient failures |
+| `14_prompt_caching.py` | `prompt_cache_key` + `cache_stats` |
 
 ## Development
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 106 tests, ~0.1s
+uv run pytest                      # 171 tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 
