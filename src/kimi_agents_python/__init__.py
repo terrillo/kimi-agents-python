@@ -41,6 +41,7 @@ from .exceptions import (
     KimiPermissionError,
     KimiRateLimitError,
     KimiServerError,
+    KimiToolLoopError,
     PermissionDeniedError,
     RateLimitReachedError,
     ResourceNotFoundError,
@@ -48,6 +49,7 @@ from .exceptions import (
     UnexpectedOutputError,
 )
 from .specs import MODEL_SPECS, ModelSpec, get_model_spec
+from .tools import KimiTool, arun_tools, kimi_tool, run_tools
 from .types import (
     AssistantMessage,
     BalanceData,
@@ -117,6 +119,8 @@ __all__ = [
     "KimiPermissionError",
     "KimiRateLimitError",
     "KimiServerError",
+    "KimiTool",
+    "KimiToolLoopError",
     "MAX_FILE_BYTES",
     "MAX_FILES",
     "MAX_TOTAL_BYTES",
@@ -149,8 +153,11 @@ __all__ = [
     "VIDEO_FORMATS",
     "VideoUrl",
     "VideoUrlPart",
+    "arun_tools",
     "file_extension",
     "get_model_spec",
+    "kimi_tool",
+    "run_tools",
     "supported_formats",
     "validate_file",
     "validate_file_format",

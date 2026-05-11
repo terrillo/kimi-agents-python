@@ -5,6 +5,10 @@ class KimiError(Exception):
     pass
 
 
+class KimiToolLoopError(KimiError):
+    """run_tools / arun_tools exceeded its max_steps budget."""
+
+
 class KimiAPIError(KimiError):
     def __init__(
         self,

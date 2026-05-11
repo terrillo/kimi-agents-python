@@ -16,6 +16,7 @@ from ._http import (
     resolve_api_key,
 )
 from .specs import get_model_spec
+from .tools import KimiTool
 from .types import (
     BalanceInfo,
     ChatCompletion,
@@ -40,6 +41,14 @@ def _build_request_body(
     spec = get_model_spec(model)
     if spec is not None:
         spec.validate_params(extra)
+    if extra.get("tools"):
+        extra = {
+            **extra,
+            "tools": [
+                t.to_tool_def() if isinstance(t, KimiTool) else t
+                for t in extra["tools"]
+            ],
+        }
     payload: dict[str, Any] = {
         "model": str(model),
         "messages": list(messages),
