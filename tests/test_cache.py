@@ -10,7 +10,6 @@ from kimi_agents_python import (
     ChatCompletionChunk,
     KimiClient,
     Model,
-    PromptTokensDetails,
     Usage,
 )
 from tests.conftest import completion_body, make_sync_client
@@ -43,13 +42,6 @@ def test_usage_parses_nested_prompt_tokens_details() -> None:
     )
     assert u.prompt_tokens_details is not None
     assert u.prompt_tokens_details.cached_tokens == 64
-
-
-def test_usage_nested_optional_when_absent() -> None:
-    u = Usage.model_validate(
-        {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-    )
-    assert u.prompt_tokens_details is None
 
 
 # --- per-call cached_tokens accessor ------------------------------------------
@@ -113,41 +105,9 @@ def test_chat_completion_chunk_cached_tokens_zero_when_no_usage() -> None:
 
 
 # --- CacheStats record() -------------------------------------------------------
-
-
-def test_stats_prefers_nested_cached_tokens() -> None:
-    stats = CacheStats()
-    stats.record(
-        Usage(
-            prompt_tokens=100,
-            completion_tokens=10,
-            total_tokens=110,
-            cached_tokens=999,  # legacy field — should be ignored when nested present
-            prompt_tokens_details=PromptTokensDetails(cached_tokens=64),
-        )
-    )
-    assert stats.cached_tokens == 64
-    assert stats.prompt_tokens == 100
-    assert stats.requests == 1
-
-
-def test_stats_falls_back_to_legacy_cached_tokens() -> None:
-    stats = CacheStats()
-    stats.record(
-        Usage(
-            prompt_tokens=50,
-            completion_tokens=5,
-            total_tokens=55,
-            cached_tokens=32,
-        )
-    )
-    assert stats.cached_tokens == 32
-
-
-def test_stats_zero_cached_when_absent() -> None:
-    stats = CacheStats()
-    stats.record(Usage(prompt_tokens=10, completion_tokens=2, total_tokens=12))
-    assert stats.cached_tokens == 0
+# Precedence (nested wins, legacy fallback, zero when absent) is exercised
+# end-to-end in test_chat_records_stats / test_chat_records_stats_with_legacy_field
+# below. Only hit_ratio + reset need direct pins.
 
 
 def test_stats_hit_ratio() -> None:

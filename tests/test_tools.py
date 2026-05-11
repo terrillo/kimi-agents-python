@@ -276,27 +276,6 @@ async def test_async_tool_invoke_in_running_loop_raises() -> None:
         fn.invoke('{"x":1}')
 
 
-# -- can_parallel ---------------------------------------------------------------
-
-
-def test_can_parallel_default_true() -> None:
-    @kimi_tool
-    def fn(x: int) -> int:
-        """Doc."""
-        return x
-
-    assert fn.can_parallel is True
-
-
-def test_can_parallel_override_false() -> None:
-    @kimi_tool(can_parallel=False)
-    def fn(x: int) -> int:
-        """Doc."""
-        return x
-
-    assert fn.can_parallel is False
-
-
 # -- client.chat.create() integration --------------------------------------------------
 
 

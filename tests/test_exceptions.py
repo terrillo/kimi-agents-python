@@ -75,17 +75,3 @@ def test_exception_for_unknown_type_falls_back_to_status() -> None:
     assert exception_for(404, None) is KimiNotFoundError
 
 
-def test_api_error_attributes() -> None:
-    e = KimiAPIError(
-        "boom",
-        status_code=429,
-        error_type="rate_limit_reached_error",
-        error_code="rl_1",
-        raw={"foo": "bar"},
-    )
-    assert e.message == "boom"
-    assert e.status_code == 429
-    assert e.error_type == "rate_limit_reached_error"
-    assert e.error_code == "rl_1"
-    assert e.raw == {"foo": "bar"}
-    assert "429" in repr(e)

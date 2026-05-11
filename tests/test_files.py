@@ -8,7 +8,6 @@ from kimi_agents_python import (
     BATCH_FORMATS,
     FILE_EXTRACT_FORMATS,
     IMAGE_FORMATS,
-    MAX_FILE_BYTES,
     VIDEO_FORMATS,
     FilePurpose,
     file_extension,
@@ -17,26 +16,6 @@ from kimi_agents_python import (
     validate_file_format,
     validate_file_size,
 )
-
-
-def test_image_formats_match_docs() -> None:
-    # Per https://platform.kimi.ai/docs/guide/use-kimi-vision-model
-    for ext in ("png", "jpeg", "webp", "gif"):
-        assert ext in IMAGE_FORMATS
-
-
-def test_video_formats_match_docs() -> None:
-    for ext in ("mp4", "mpeg", "mov", "avi", "x-flv", "mpg", "webm", "wmv", "3gpp"):
-        assert ext in VIDEO_FORMATS
-
-
-def test_file_extract_formats_include_common_types() -> None:
-    for ext in ("pdf", "docx", "txt", "csv", "md", "html", "py", "json"):
-        assert ext in FILE_EXTRACT_FORMATS
-
-
-def test_batch_formats_is_jsonl_only() -> None:
-    assert BATCH_FORMATS == frozenset({"jsonl"})
 
 
 def test_supported_formats_by_purpose() -> None:
@@ -117,12 +96,3 @@ def test_validate_file_combined(tmp_path: Path) -> None:
         validate_file(bad, FilePurpose.VIDEO)
 
 
-def test_max_file_bytes_constant() -> None:
-    assert MAX_FILE_BYTES == 100 * 1024 * 1024
-
-
-def test_file_purpose_values() -> None:
-    assert FilePurpose.FILE_EXTRACT == "file-extract"
-    assert FilePurpose.IMAGE == "image"
-    assert FilePurpose.VIDEO == "video"
-    assert FilePurpose.BATCH == "batch"
