@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, get_type_hints, overload
@@ -10,13 +11,18 @@ from typing import TYPE_CHECKING, Any, get_type_hints, overload
 from pydantic import BaseModel, create_model
 from pydantic.fields import FieldInfo
 
-from .exceptions import KimiToolLoopError
+from .exceptions import (
+    KimiToolLoopError,
+    ReadOnlyStreakExceededError,
+    RepeatedToolCallError,
+    TokenBudgetExceededError,
+)
 from .types import FunctionDef, ToolDef
 
 if TYPE_CHECKING:
     from ._enums import Model
     from .client import AsyncKimiClient, KimiClient
-    from .types import ChatCompletion, Message
+    from .types import ChatCompletion, Message, Usage
 
 
 _SENTINEL = object()
@@ -105,6 +111,10 @@ class KimiTool:
     """Client-side metadata; never serialised onto the Kimi request body.
     Read by :func:`arun_tools` to decide which calls in a turn go into
     ``asyncio.gather`` and which run sequentially."""
+    read_only: bool
+    """Marker for :class:`LoopGuards` — when ``True``, this tool does not
+    mutate state, and a streak of consecutive read-only calls counts toward
+    ``read_only_streak``. Never serialised on the wire."""
     failure_error_function: Callable[[Exception], str] | None
     args_model: type[BaseModel] = field(repr=False)
 
@@ -178,6 +188,7 @@ def kimi_tool(
     description_override: str | None = None,
     strict: bool = True,
     can_parallel: bool = True,
+    read_only: bool = False,
     failure_error_function: Callable[[Exception], str] | None = ...,
     use_docstring: bool = True,
 ) -> Callable[[Callable[..., Any]], KimiTool]: ...
@@ -189,6 +200,7 @@ def kimi_tool(
     description_override: str | None = None,
     strict: bool = True,
     can_parallel: bool = True,
+    read_only: bool = False,
     failure_error_function: Callable[[Exception], str] | None | object = _SENTINEL,
     use_docstring: bool = True,
 ) -> KimiTool | Callable[[Callable[..., Any]], KimiTool]:
@@ -222,6 +234,7 @@ def kimi_tool(
             is_async=inspect.iscoroutinefunction(f),
             strict=strict,
             can_parallel=can_parallel,
+            read_only=read_only,
             failure_error_function=failure,
             args_model=args_model,
         )
@@ -257,6 +270,89 @@ def _tool_result_record(tc: Any, content: str) -> dict:
     }
 
 
+@dataclass(frozen=True, slots=True)
+class LoopGuards:
+    """Optional safety limits for :func:`run_tools` / :func:`arun_tools`.
+
+    Each field is opt-in: leaving it ``None`` disables that guard. Guards
+    fire as :class:`KimiToolLoopError` subclasses so callers can catch the
+    base class or the specific reason.
+    """
+
+    max_tokens: int | None = None
+    """Raise :class:`TokenBudgetExceededError` once cumulative
+    ``usage.total_tokens`` across all turns crosses this value."""
+
+    read_only_streak: int | None = None
+    """Raise :class:`ReadOnlyStreakExceededError` after this many consecutive
+    calls to tools marked ``@kimi_tool(read_only=True)`` with no mutating call
+    in between. Resets when a non-read-only tool runs."""
+
+    repeat_threshold: int | None = None
+    """Raise :class:`RepeatedToolCallError` when the same ``(tool_name,
+    arguments)`` appears this many times in a row across the loop. Resets on
+    any different call."""
+
+
+def _normalize_args(arguments: str) -> str:
+    """Best-effort canonicalize tool-call args for repeat detection.
+
+    Returns a key-sorted JSON dump so cosmetically-different whitespace doesn't
+    defeat the guard. Falls through to the raw value on malformed input.
+    """
+    try:
+        return json.dumps(json.loads(arguments), sort_keys=True)
+    except (json.JSONDecodeError, TypeError):
+        return arguments
+
+
+class _LoopState:
+    """Per-loop counters that drive :class:`LoopGuards` checks."""
+
+    __slots__ = ("guards", "total_tokens", "read_only_streak", "_recent")
+
+    def __init__(self, guards: LoopGuards) -> None:
+        self.guards = guards
+        self.total_tokens = 0
+        self.read_only_streak = 0
+        self._recent: deque[tuple[str, str]] = deque(
+            maxlen=guards.repeat_threshold or 1
+        )
+
+    def record_tokens(self, usage: Usage | None) -> None:
+        if self.guards.max_tokens is None or usage is None:
+            return
+        self.total_tokens += usage.total_tokens
+        if self.total_tokens > self.guards.max_tokens:
+            raise TokenBudgetExceededError(
+                f"Tool loop exceeded token budget: "
+                f"{self.total_tokens} > {self.guards.max_tokens}"
+            )
+
+    def record_call(self, tool: KimiTool | None, tc: Any) -> None:
+        threshold = self.guards.repeat_threshold
+        if threshold is not None:
+            key = (tc.function.name, _normalize_args(tc.function.arguments))
+            self._recent.append(key)
+            if len(self._recent) == threshold and len(set(self._recent)) == 1:
+                raise RepeatedToolCallError(
+                    f"Tool '{tc.function.name}' called {threshold} times in a row "
+                    f"with the same arguments"
+                )
+        streak_limit = self.guards.read_only_streak
+        if streak_limit is None or tool is None:
+            return
+        if tool.read_only:
+            self.read_only_streak += 1
+            if self.read_only_streak >= streak_limit:
+                raise ReadOnlyStreakExceededError(
+                    f"Tool loop made {self.read_only_streak} consecutive read-only "
+                    f"calls (limit {streak_limit}) without a mutating call"
+                )
+        else:
+            self.read_only_streak = 0
+
+
 def run_tools(
     client: KimiClient,
     *,
@@ -264,27 +360,32 @@ def run_tools(
     messages: Sequence[dict | Message],
     tools: Sequence[KimiTool],
     max_steps: int = 5,
+    guards: LoopGuards | None = None,
     **chat_kwargs: Any,
 ) -> ChatCompletion:
     """Drive the chat → tool_calls → result loop synchronously to completion.
 
     Stops when the assistant returns a message with no ``tool_calls``.
-    Raises :class:`KimiToolLoopError` if ``max_steps`` is exhausted first.
+    Raises :class:`KimiToolLoopError` if ``max_steps`` is exhausted first;
+    raises a subclass when an optional :class:`LoopGuards` limit is hit.
     ``can_parallel`` is recorded on each tool but has no effect in the sync
     helper — call dispatch is always sequential.
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
+    state = _LoopState(guards or LoopGuards())
     for _ in range(max_steps):
         response = client.chat.create(
             model=model, messages=convo, tools=list(tools), **chat_kwargs
         )
+        state.record_tokens(response.usage)
         msg = response.choices[0].message
         if not msg.tool_calls:
             return response
         convo.append(_assistant_record(msg))
         for tc in msg.tool_calls:
             tool = registry.get(tc.function.name)
+            state.record_call(tool, tc)
             content = (
                 tool.invoke(tc.function.arguments)
                 if tool is not None
@@ -301,6 +402,7 @@ async def arun_tools(
     messages: Sequence[dict | Message],
     tools: Sequence[KimiTool],
     max_steps: int = 5,
+    guards: LoopGuards | None = None,
     **chat_kwargs: Any,
 ) -> ChatCompletion:
     """Async equivalent of :func:`run_tools` with partitioned parallel dispatch.
@@ -311,19 +413,27 @@ async def arun_tools(
     tools and unknown tool names) run sequentially. Results are appended to the
     transcript in the model's original ``tool_calls`` order regardless of
     dispatch order, so subsequent turns see a deterministic conversation.
+
+    :class:`LoopGuards` checks are evaluated in the model's original call
+    order, before any dispatch — so a guard can short-circuit a parallel
+    batch before it kicks off.
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
+    state = _LoopState(guards or LoopGuards())
     for _ in range(max_steps):
         response = await client.chat.create(
             model=model, messages=convo, tools=list(tools), **chat_kwargs
         )
+        state.record_tokens(response.usage)
         msg = response.choices[0].message
         if not msg.tool_calls:
             return response
         convo.append(_assistant_record(msg))
 
         resolved = [(tc, registry.get(tc.function.name)) for tc in msg.tool_calls]
+        for tc, t in resolved:
+            state.record_call(t, tc)
         results: list[str | None] = [None] * len(resolved)
 
         parallel_indices: list[int] = []

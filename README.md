@@ -216,6 +216,46 @@ async def append_to_log(entry: str) -> str:
 
 `can_parallel` is client-side metadata — it is **never** serialised onto the Kimi request body. The synchronous `run_tools` always dispatches sequentially regardless of the flag.
 
+### Loop guards (`LoopGuards`)
+
+`max_steps` catches infinite-iteration loops, but real production loops hit three more subtle failure modes: cost overruns, stuck-in-reads, and the model emitting the same call over and over. Pass an optional `LoopGuards` to `run_tools` / `arun_tools` to catch them:
+
+```python
+from kimi_agents_python import LoopGuards, run_tools
+
+run_tools(
+    client, model=..., messages=..., tools=[...],
+    guards=LoopGuards(
+        max_tokens=20_000,        # cumulative usage.total_tokens cap
+        read_only_streak=8,       # bail after 8 consecutive read-only calls
+        repeat_threshold=3,       # bail when same (name, args) appears 3× in a row
+    ),
+)
+```
+
+Each field is opt-in (`None` disables it). Violations raise dedicated subclasses of `KimiToolLoopError`:
+
+| Field | Exception | Triggered when |
+|---|---|---|
+| `max_tokens` | `TokenBudgetExceededError` | Cumulative `usage.total_tokens` across the loop crosses the budget |
+| `read_only_streak` | `ReadOnlyStreakExceededError` | N consecutive calls to tools marked `@kimi_tool(read_only=True)` with no mutating call in between |
+| `repeat_threshold` | `RepeatedToolCallError` | Same `(tool name, JSON-normalized args)` appears N times in a row |
+
+Mark read-only tools at declaration time so the streak guard knows what counts:
+
+```python
+@kimi_tool(read_only=True)
+def search(query: str) -> dict:
+    """Pure lookup — does not mutate anything."""
+    ...
+
+@kimi_tool  # default read_only=False — assumed mutating
+def write_file(path: str, body: str) -> str:
+    ...
+```
+
+Catch the base `KimiToolLoopError` to handle every termination reason uniformly, or the specific subclass to react differently (e.g. retry with a smaller budget vs. nudge the model with a hint).
+
 ## Structured output (JSON schema)
 
 ```python
@@ -466,7 +506,7 @@ uv run python examples/01_basic_chat.py
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 196 tests, <1s
+uv run pytest                      # 213 tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 

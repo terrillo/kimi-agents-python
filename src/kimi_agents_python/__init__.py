@@ -46,14 +46,17 @@ from .exceptions import (
     KimiToolLoopError,
     PermissionDeniedError,
     RateLimitReachedError,
+    ReadOnlyStreakExceededError,
+    RepeatedToolCallError,
     ResourceNotFoundError,
     ServerErrorResponse,
+    TokenBudgetExceededError,
     UnexpectedOutputError,
 )
 from ._retry import DEFAULT_RETRY, NO_RETRY, RetryConfig
 from ._stats import CacheStats
 from .specs import MODEL_SPECS, ModelSpec, get_model_spec
-from .tools import KimiTool, arun_tools, kimi_tool, run_tools
+from .tools import KimiTool, LoopGuards, arun_tools, kimi_tool, run_tools
 from .resources.files import FileContent
 from .types import (
     AssistantMessage,
@@ -144,6 +147,7 @@ __all__ = [
     "KimiServerError",
     "KimiTool",
     "KimiToolLoopError",
+    "LoopGuards",
     "MAX_FILE_BYTES",
     "MAX_FILES",
     "MAX_TOTAL_BYTES",
@@ -157,6 +161,8 @@ __all__ = [
     "PermissionDeniedError",
     "PromptTokensDetails",
     "RateLimitReachedError",
+    "ReadOnlyStreakExceededError",
+    "RepeatedToolCallError",
     "ResourceNotFoundError",
     "ResponseFormat",
     "ResponseFormatType",
@@ -169,6 +175,7 @@ __all__ = [
     "ThinkingConfig",
     "ThinkingMode",
     "ThinkingSupport",
+    "TokenBudgetExceededError",
     "TokenEstimate",
     "TokenEstimateData",
     "ToolCall",

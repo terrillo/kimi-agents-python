@@ -14,7 +14,11 @@ from kimi_agents_python import (
     KimiClient,
     KimiTool,
     KimiToolLoopError,
+    LoopGuards,
     Model,
+    ReadOnlyStreakExceededError,
+    RepeatedToolCallError,
+    TokenBudgetExceededError,
     arun_tools,
     kimi_tool,
     run_tools,
@@ -760,3 +764,322 @@ def test_run_tools_omits_reasoning_content_when_none() -> None:
 
     assistant_msg = calls[1]["messages"][1]
     assert "reasoning_content" not in assistant_msg
+
+
+# -- LoopGuards (run_tools) ----------------------------------------------------
+
+
+def _tool_call_response(name: str, args: str, *, total_tokens: int = 2) -> dict:
+    body = _completion_with(
+        tool_calls=[
+            {
+                "id": f"c-{name}-{args}",
+                "type": "function",
+                "function": {"name": name, "arguments": args},
+            }
+        ],
+        content=None,
+    )
+    body["usage"]["total_tokens"] = total_tokens
+    return body
+
+
+def test_run_tools_guards_default_none_preserves_behavior() -> None:
+    """Omitting `guards=` keeps the loop fully open — back-compat check."""
+
+    @kimi_tool
+    def get_weather(city: str) -> dict:
+        """Lookup."""
+        return {"city": city}
+
+    step = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal step
+        step += 1
+        if step == 1:
+            return httpx.Response(
+                200,
+                json=_tool_call_response("get_weather", '{"city":"Tokyo"}'),
+            )
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    with make_sync_client(handler) as client:
+        result = run_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "weather?"}],
+            tools=[get_weather],
+        )
+    assert result.choices[0].message.content == "done"
+
+
+def test_run_tools_token_budget_raises() -> None:
+    @kimi_tool
+    def echo(msg: str) -> str:
+        """Echo."""
+        return msg
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_tool_call_response("echo", '{"msg":"hi"}', total_tokens=300),
+        )
+
+    with make_sync_client(handler) as client:
+        with pytest.raises(TokenBudgetExceededError, match="500"):
+            run_tools(
+                client,
+                model=Model.KIMI_K2_0905_PREVIEW,
+                messages=[{"role": "user", "content": "?"}],
+                tools=[echo],
+                max_steps=10,
+                guards=LoopGuards(max_tokens=500),
+            )
+
+
+def test_run_tools_token_budget_passes_under_limit() -> None:
+    @kimi_tool
+    def echo(msg: str) -> str:
+        """Echo."""
+        return msg
+
+    step = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal step
+        step += 1
+        if step == 1:
+            return httpx.Response(
+                200,
+                json=_tool_call_response("echo", '{"msg":"hi"}', total_tokens=100),
+            )
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    with make_sync_client(handler) as client:
+        result = run_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[echo],
+            guards=LoopGuards(max_tokens=1000),
+        )
+    assert result.choices[0].message.content == "done"
+
+
+def test_run_tools_repeated_call_raises_after_threshold() -> None:
+    """Same (name, args) emitted three turns in a row → RepeatedToolCallError."""
+
+    @kimi_tool
+    def search(q: str) -> dict:
+        """Search."""
+        return {"q": q, "hits": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_tool_call_response("search", '{"q":"x"}')
+        )
+
+    with make_sync_client(handler) as client:
+        with pytest.raises(RepeatedToolCallError, match="search"):
+            run_tools(
+                client,
+                model=Model.KIMI_K2_0905_PREVIEW,
+                messages=[{"role": "user", "content": "?"}],
+                tools=[search],
+                max_steps=10,
+                guards=LoopGuards(repeat_threshold=3),
+            )
+
+
+def test_run_tools_repeat_threshold_resets_on_different_args() -> None:
+    """A different argument breaks the streak; loop continues to completion."""
+
+    @kimi_tool
+    def search(q: str) -> dict:
+        """Search."""
+        return {"q": q}
+
+    step = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal step
+        step += 1
+        if step in (1, 2):
+            return httpx.Response(
+                200, json=_tool_call_response("search", '{"q":"a"}')
+            )
+        if step == 3:
+            return httpx.Response(
+                200, json=_tool_call_response("search", '{"q":"b"}')
+            )
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    with make_sync_client(handler) as client:
+        result = run_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[search],
+            max_steps=10,
+            guards=LoopGuards(repeat_threshold=3),
+        )
+    assert result.choices[0].message.content == "done"
+
+
+def test_run_tools_repeat_threshold_normalizes_arg_whitespace() -> None:
+    """Same args formatted differently still count as repeats."""
+
+    @kimi_tool
+    def search(q: str) -> dict:
+        """Search."""
+        return {"q": q}
+
+    formats = ['{"q":"x"}', '{ "q": "x" }', '{"q":  "x"}']
+    step = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal step
+        if step < len(formats):
+            body = _tool_call_response("search", formats[step])
+            step += 1
+            return httpx.Response(200, json=body)
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    with make_sync_client(handler) as client:
+        with pytest.raises(RepeatedToolCallError):
+            run_tools(
+                client,
+                model=Model.KIMI_K2_0905_PREVIEW,
+                messages=[{"role": "user", "content": "?"}],
+                tools=[search],
+                max_steps=10,
+                guards=LoopGuards(repeat_threshold=3),
+            )
+
+
+def test_run_tools_read_only_streak_raises() -> None:
+    """N consecutive calls to read_only tools without a mutating call → raise."""
+
+    @kimi_tool(read_only=True)
+    def search(q: str) -> dict:
+        """Search (read-only)."""
+        return {"q": q}
+
+    args_seq = ['{"q":"a"}', '{"q":"b"}', '{"q":"c"}']
+    step = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal step
+        if step < len(args_seq):
+            body = _tool_call_response("search", args_seq[step])
+            step += 1
+            return httpx.Response(200, json=body)
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    with make_sync_client(handler) as client:
+        with pytest.raises(ReadOnlyStreakExceededError, match="3 consecutive"):
+            run_tools(
+                client,
+                model=Model.KIMI_K2_0905_PREVIEW,
+                messages=[{"role": "user", "content": "?"}],
+                tools=[search],
+                max_steps=10,
+                guards=LoopGuards(read_only_streak=3),
+            )
+
+
+def test_run_tools_read_only_streak_resets_on_mutating_call() -> None:
+    @kimi_tool(read_only=True)
+    def search(q: str) -> dict:
+        """Search (read-only)."""
+        return {"q": q}
+
+    @kimi_tool  # default read_only=False — mutating
+    def write(value: str) -> str:
+        """Write."""
+        return value
+
+    step = 0
+    plan = [
+        ("search", '{"q":"a"}'),
+        ("search", '{"q":"b"}'),
+        ("write", '{"value":"x"}'),  # resets the streak
+        ("search", '{"q":"c"}'),
+        ("search", '{"q":"d"}'),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal step
+        if step >= len(plan):
+            return httpx.Response(200, json=_completion_with(content="done"))
+        name, args = plan[step]
+        step += 1
+        return httpx.Response(200, json=_tool_call_response(name, args))
+
+    with make_sync_client(handler) as client:
+        result = run_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[search, write],
+            max_steps=10,
+            guards=LoopGuards(read_only_streak=3),
+        )
+    assert result.choices[0].message.content == "done"
+
+
+def test_loop_guards_exceptions_inherit_from_kimi_tool_loop_error() -> None:
+    """Callers can catch the base class to handle all four termination reasons."""
+    assert issubclass(TokenBudgetExceededError, KimiToolLoopError)
+    assert issubclass(ReadOnlyStreakExceededError, KimiToolLoopError)
+    assert issubclass(RepeatedToolCallError, KimiToolLoopError)
+
+
+async def test_arun_tools_token_budget_raises() -> None:
+    @kimi_tool
+    async def echo(msg: str) -> str:
+        """Echo."""
+        return msg
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_tool_call_response("echo", '{"msg":"hi"}', total_tokens=400),
+        )
+
+    async with make_async_client(handler) as client:
+        with pytest.raises(TokenBudgetExceededError):
+            await arun_tools(
+                client,
+                model=Model.KIMI_K2_0905_PREVIEW,
+                messages=[{"role": "user", "content": "?"}],
+                tools=[echo],
+                max_steps=10,
+                guards=LoopGuards(max_tokens=500),
+            )
+
+
+async def test_arun_tools_repeat_threshold_short_circuits_before_dispatch() -> None:
+    """The guard fires on the third turn's call, before parallel dispatch."""
+
+    @kimi_tool
+    async def search(q: str) -> dict:
+        """Search."""
+        return {"q": q}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_tool_call_response("search", '{"q":"same"}')
+        )
+
+    async with make_async_client(handler) as client:
+        with pytest.raises(RepeatedToolCallError):
+            await arun_tools(
+                client,
+                model=Model.KIMI_K2_0905_PREVIEW,
+                messages=[{"role": "user", "content": "?"}],
+                tools=[search],
+                max_steps=10,
+                guards=LoopGuards(repeat_threshold=3),
+            )

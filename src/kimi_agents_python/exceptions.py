@@ -6,7 +6,27 @@ class KimiError(Exception):
 
 
 class KimiToolLoopError(KimiError):
-    """run_tools / arun_tools exceeded its max_steps budget."""
+    """run_tools / arun_tools terminated by a budget or safety guard.
+
+    Raised directly when ``max_steps`` is exhausted. Subclasses are raised
+    when an explicit :class:`LoopGuards` limit is hit:
+
+    * :class:`TokenBudgetExceededError` — cumulative usage over ``max_tokens``
+    * :class:`ReadOnlyStreakExceededError` — too many consecutive read-only calls
+    * :class:`RepeatedToolCallError` — same tool+args invoked N times in a row
+    """
+
+
+class TokenBudgetExceededError(KimiToolLoopError):
+    """Cumulative ``usage.total_tokens`` across the loop exceeded ``LoopGuards.max_tokens``."""
+
+
+class ReadOnlyStreakExceededError(KimiToolLoopError):
+    """Loop made N consecutive read-only tool calls without a mutating call between them."""
+
+
+class RepeatedToolCallError(KimiToolLoopError):
+    """Same (tool name, arguments) appeared N times in a row — likely a stuck loop."""
 
 
 class KimiAPIError(KimiError):
