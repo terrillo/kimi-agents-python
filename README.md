@@ -573,7 +573,7 @@ uv run python examples/01_basic_chat.py
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 223 tests, <1s
+uv run pytest                      # 205 tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 

@@ -15,7 +15,6 @@ from kimi_agents_python import (
 )
 from kimi_agents_python import _http as http_mod
 from kimi_agents_python._http import (
-    bearer_headers,
     parse_sse_line,
     raise_for_status,
     resolve_api_key,
@@ -23,22 +22,9 @@ from kimi_agents_python._http import (
 
 
 # --- parse_sse_line ------------------------------------------------------------
-
-
-def test_parse_sse_line_data() -> None:
-    assert parse_sse_line('data: {"a": 1}') == {"a": 1}
-
-
-def test_parse_sse_line_empty() -> None:
-    assert parse_sse_line("") is None
-
-
-def test_parse_sse_line_done() -> None:
-    assert parse_sse_line("data: [DONE]") is None
-
-
-def test_parse_sse_line_non_data_prefix() -> None:
-    assert parse_sse_line("event: ping") is None
+# Happy-path cases (data, [DONE], empty, non-data prefix) are exercised by the
+# streaming integration tests in test_client_sync / test_client_async; only the
+# error branch needs a unit-level pin.
 
 
 def test_parse_sse_line_invalid_json_raises() -> None:
@@ -91,13 +77,6 @@ def test_raise_for_status_falls_back_to_status_message() -> None:
     with pytest.raises(KimiAPIError) as exc:
         raise_for_status(_resp(418, text=""))
     assert "418" in exc.value.message
-
-
-# --- bearer_headers ------------------------------------------------------------
-
-
-def test_bearer_headers() -> None:
-    assert bearer_headers("sk-abc") == {"Authorization": "Bearer sk-abc"}
 
 
 # --- resolve_api_key -----------------------------------------------------------

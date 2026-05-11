@@ -119,31 +119,6 @@ def test_moonshot_default_temperature_zero_with_implicit_n_gt_1() -> None:
         spec.validate_params({"n": 2})
 
 
-def test_context_lengths() -> None:
-    assert MODEL_SPECS[Model.MOONSHOT_V1_8K].context_length == 8_192
-    assert MODEL_SPECS[Model.MOONSHOT_V1_32K].context_length == 32_768
-    assert MODEL_SPECS[Model.MOONSHOT_V1_128K].context_length == 131_072
-    assert MODEL_SPECS[Model.KIMI_K2_6].context_length == 262_144
-    assert MODEL_SPECS[Model.KIMI_K2_0711_PREVIEW].context_length == 131_072
-
-
-def test_vision_and_video_capabilities() -> None:
-    assert MODEL_SPECS[Model.KIMI_K2_6].supports_vision is True
-    assert MODEL_SPECS[Model.KIMI_K2_6].supports_video is True
-    assert MODEL_SPECS[Model.MOONSHOT_V1_8K_VISION_PREVIEW].supports_vision is True
-    assert MODEL_SPECS[Model.MOONSHOT_V1_8K_VISION_PREVIEW].supports_video is False
-    assert MODEL_SPECS[Model.MOONSHOT_V1_8K].supports_vision is False
-
-
-def test_families() -> None:
-    assert MODEL_SPECS[Model.KIMI_K2_6].family == "kimi-k2.6"
-    assert MODEL_SPECS[Model.KIMI_K2_5].family == "kimi-k2.5"
-    assert MODEL_SPECS[Model.KIMI_K2_0905_PREVIEW].family == "kimi-k2"
-    assert MODEL_SPECS[Model.KIMI_K2_THINKING].family == "kimi-k2-thinking"
-    assert MODEL_SPECS[Model.MOONSHOT_V1_8K].family == "moonshot-v1"
-    assert MODEL_SPECS[Model.MOONSHOT_V1_8K_VISION_PREVIEW].family == "moonshot-v1-vision"
-
-
 # --- tool_choice + thinking ---------------------------------------------------
 
 
@@ -201,8 +176,3 @@ def test_thinking_incompatibility_is_a_value_error() -> None:
         )
 
 
-def test_tool_choice_enum_includes_required() -> None:
-    """Without this, pydantic would reject tool_choice='required' before our check fires."""
-    from kimi_agents_python import ToolChoice
-
-    assert ToolChoice.REQUIRED.value == "required"

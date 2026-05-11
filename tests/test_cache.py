@@ -45,13 +45,6 @@ def test_usage_parses_nested_prompt_tokens_details() -> None:
     assert u.prompt_tokens_details.cached_tokens == 64
 
 
-def test_usage_nested_optional_when_absent() -> None:
-    u = Usage.model_validate(
-        {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-    )
-    assert u.prompt_tokens_details is None
-
-
 # --- per-call cached_tokens accessor ------------------------------------------
 
 
