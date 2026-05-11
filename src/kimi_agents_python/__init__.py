@@ -48,6 +48,7 @@ from .exceptions import (
     ServerErrorResponse,
     UnexpectedOutputError,
 )
+from ._retry import DEFAULT_RETRY, NO_RETRY, RetryConfig
 from .specs import MODEL_SPECS, ModelSpec, get_model_spec
 from .tools import KimiTool, arun_tools, kimi_tool, run_tools
 from .types import (
@@ -96,6 +97,7 @@ __all__ = [
     "ChoiceDelta",
     "ContentFilterError",
     "ContentPart",
+    "DEFAULT_RETRY",
     "EngineOverloadedError",
     "ExceededCurrentQuotaError",
     "FILE_EXTRACT_FORMATS",
@@ -130,11 +132,13 @@ __all__ = [
     "ModelInfo",
     "ModelList",
     "ModelSpec",
+    "NO_RETRY",
     "PermissionDeniedError",
     "RateLimitReachedError",
     "ResourceNotFoundError",
     "ResponseFormat",
     "ResponseFormatType",
+    "RetryConfig",
     "Role",
     "ServerErrorResponse",
     "StreamChoice",

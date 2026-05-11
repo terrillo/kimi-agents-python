@@ -66,7 +66,22 @@ def raise_for_status(response: httpx.Response) -> None:
         error_type=err_type,
         error_code=err_code,
         raw=body,
+        retry_after=parse_retry_after(response.headers.get("retry-after")),
     )
+
+
+def parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header. Returns seconds, or None when absent/unsupported.
+
+    Only the delta-seconds form is supported; HTTP-date values are ignored.
+    """
+    if not value:
+        return None
+    try:
+        seconds = float(value.strip())
+    except ValueError:
+        return None
+    return seconds if seconds >= 0 else None
 
 
 def parse_sse_line(line: str) -> dict[str, Any] | None:

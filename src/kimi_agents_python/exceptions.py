@@ -18,6 +18,7 @@ class KimiAPIError(KimiError):
         error_type: str | None = None,
         error_code: str | None = None,
         raw: object = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -25,6 +26,7 @@ class KimiAPIError(KimiError):
         self.error_type = error_type
         self.error_code = error_code
         self.raw = raw
+        self.retry_after = retry_after
 
     def __repr__(self) -> str:
         return (

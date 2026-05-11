@@ -22,20 +22,28 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
 
-def make_sync_client(handler: Handler, *, api_key: str = "test-key") -> KimiClient:
+def make_sync_client(
+    handler: Handler, *, api_key: str = "test-key", max_retries: int = 0
+) -> KimiClient:
     http_client = httpx.Client(
         base_url="https://api.moonshot.ai/v1",
         transport=httpx.MockTransport(handler),
     )
-    return KimiClient(api_key=api_key, http_client=http_client)
+    return KimiClient(
+        api_key=api_key, http_client=http_client, max_retries=max_retries
+    )
 
 
-def make_async_client(handler: Handler, *, api_key: str = "test-key") -> AsyncKimiClient:
+def make_async_client(
+    handler: Handler, *, api_key: str = "test-key", max_retries: int = 0
+) -> AsyncKimiClient:
     http_client = httpx.AsyncClient(
         base_url="https://api.moonshot.ai/v1",
         transport=httpx.MockTransport(handler),
     )
-    return AsyncKimiClient(api_key=api_key, http_client=http_client)
+    return AsyncKimiClient(
+        api_key=api_key, http_client=http_client, max_retries=max_retries
+    )
 
 
 def sse_response(chunks: list[dict | str]) -> httpx.Response:

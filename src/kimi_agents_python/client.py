@@ -15,6 +15,7 @@ from ._http import (
     raise_for_status,
     resolve_api_key,
 )
+from ._retry import DEFAULT_RETRY, RetryConfig, retry_async, retry_sync
 from .specs import get_model_spec
 from .tools import KimiTool
 from .types import (
@@ -29,6 +30,16 @@ from .types import (
 )
 
 _MessageInput = Message | dict[str, Any]
+
+
+def _resolve_retry(
+    max_retries: int | None, retry_config: RetryConfig | None
+) -> RetryConfig:
+    if retry_config is not None:
+        return retry_config
+    if max_retries is None:
+        return DEFAULT_RETRY
+    return RetryConfig(max_retries=max_retries)
 
 
 def _build_request_body(
@@ -73,6 +84,8 @@ class KimiClient:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
+        max_retries: int | None = None,
+        retry_config: RetryConfig | None = None,
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
@@ -82,6 +95,7 @@ class KimiClient:
             base_url=self._base_url,
             timeout=timeout,
         )
+        self._retry = _resolve_retry(max_retries, retry_config)
 
     def close(self) -> None:
         if self._owns_client:
@@ -131,42 +145,70 @@ class KimiClient:
         )
         if stream:
             return self._stream_chat(body)
-        response = self._http.post("/chat/completions", json=body, headers=self._auth)
-        raise_for_status(response)
-        return ChatCompletion.model_validate(response.json())
+
+        def _do() -> ChatCompletion:
+            response = self._http.post(
+                "/chat/completions", json=body, headers=self._auth
+            )
+            raise_for_status(response)
+            return ChatCompletion.model_validate(response.json())
+
+        return retry_sync(self._retry, _do)
 
     def _stream_chat(self, body: dict[str, Any]) -> Iterator[ChatCompletionChunk]:
-        with self._http.stream(
-            "POST", "/chat/completions", json=body, headers=self._auth
-        ) as response:
-            if response.status_code >= 400:
-                response.read()
-                raise_for_status(response)
+        def _open() -> tuple[Any, httpx.Response]:
+            cm = self._http.stream(
+                "POST", "/chat/completions", json=body, headers=self._auth
+            )
+            response = cm.__enter__()
+            try:
+                if response.status_code >= 400:
+                    response.read()
+                    raise_for_status(response)
+            except BaseException:
+                cm.__exit__(None, None, None)
+                raise
+            return cm, response
+
+        cm, response = retry_sync(self._retry, _open)
+        try:
             for line in response.iter_lines():
                 chunk = parse_sse_line(line)
                 if chunk is None:
                     continue
                 yield ChatCompletionChunk.model_validate(chunk)
+        finally:
+            cm.__exit__(None, None, None)
 
     def list_models(self) -> list[ModelInfo]:
-        response = self._http.get("/models", headers=self._auth)
-        raise_for_status(response)
-        return ModelList.model_validate(response.json()).data
+        def _do() -> list[ModelInfo]:
+            response = self._http.get("/models", headers=self._auth)
+            raise_for_status(response)
+            return ModelList.model_validate(response.json()).data
+
+        return retry_sync(self._retry, _do)
 
     def estimate_tokens(
         self, *, model: Model | str, messages: Iterable[_MessageInput]
     ) -> TokenEstimate:
         body = {"model": str(model), "messages": list(messages)}
-        response = self._http.post(
-            "/tokenizers/estimate-token-count", json=body, headers=self._auth
-        )
-        raise_for_status(response)
-        return TokenEstimate.model_validate(response.json())
+
+        def _do() -> TokenEstimate:
+            response = self._http.post(
+                "/tokenizers/estimate-token-count", json=body, headers=self._auth
+            )
+            raise_for_status(response)
+            return TokenEstimate.model_validate(response.json())
+
+        return retry_sync(self._retry, _do)
 
     def balance(self) -> BalanceInfo:
-        response = self._http.get("/users/me/balance", headers=self._auth)
-        raise_for_status(response)
-        return BalanceInfo.model_validate(response.json())
+        def _do() -> BalanceInfo:
+            response = self._http.get("/users/me/balance", headers=self._auth)
+            raise_for_status(response)
+            return BalanceInfo.model_validate(response.json())
+
+        return retry_sync(self._retry, _do)
 
 
 class AsyncKimiClient:
@@ -182,6 +224,8 @@ class AsyncKimiClient:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.AsyncClient | None = None,
+        max_retries: int | None = None,
+        retry_config: RetryConfig | None = None,
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
@@ -191,6 +235,7 @@ class AsyncKimiClient:
             base_url=self._base_url,
             timeout=timeout,
         )
+        self._retry = _resolve_retry(max_retries, retry_config)
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -240,43 +285,69 @@ class AsyncKimiClient:
         )
         if stream:
             return self._stream_chat(body)
-        response = await self._http.post(
-            "/chat/completions", json=body, headers=self._auth
-        )
-        raise_for_status(response)
-        return ChatCompletion.model_validate(response.json())
+
+        async def _do() -> ChatCompletion:
+            response = await self._http.post(
+                "/chat/completions", json=body, headers=self._auth
+            )
+            raise_for_status(response)
+            return ChatCompletion.model_validate(response.json())
+
+        return await retry_async(self._retry, _do)
 
     async def _stream_chat(
         self, body: dict[str, Any]
     ) -> AsyncIterator[ChatCompletionChunk]:
-        async with self._http.stream(
-            "POST", "/chat/completions", json=body, headers=self._auth
-        ) as response:
-            if response.status_code >= 400:
-                await response.aread()
-                raise_for_status(response)
+        async def _open() -> tuple[Any, httpx.Response]:
+            cm = self._http.stream(
+                "POST", "/chat/completions", json=body, headers=self._auth
+            )
+            response = await cm.__aenter__()
+            try:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise_for_status(response)
+            except BaseException:
+                await cm.__aexit__(None, None, None)
+                raise
+            return cm, response
+
+        cm, response = await retry_async(self._retry, _open)
+        try:
             async for line in response.aiter_lines():
                 chunk = parse_sse_line(line)
                 if chunk is None:
                     continue
                 yield ChatCompletionChunk.model_validate(chunk)
+        finally:
+            await cm.__aexit__(None, None, None)
 
     async def list_models(self) -> list[ModelInfo]:
-        response = await self._http.get("/models", headers=self._auth)
-        raise_for_status(response)
-        return ModelList.model_validate(response.json()).data
+        async def _do() -> list[ModelInfo]:
+            response = await self._http.get("/models", headers=self._auth)
+            raise_for_status(response)
+            return ModelList.model_validate(response.json()).data
+
+        return await retry_async(self._retry, _do)
 
     async def estimate_tokens(
         self, *, model: Model | str, messages: Iterable[_MessageInput]
     ) -> TokenEstimate:
         body = {"model": str(model), "messages": list(messages)}
-        response = await self._http.post(
-            "/tokenizers/estimate-token-count", json=body, headers=self._auth
-        )
-        raise_for_status(response)
-        return TokenEstimate.model_validate(response.json())
+
+        async def _do() -> TokenEstimate:
+            response = await self._http.post(
+                "/tokenizers/estimate-token-count", json=body, headers=self._auth
+            )
+            raise_for_status(response)
+            return TokenEstimate.model_validate(response.json())
+
+        return await retry_async(self._retry, _do)
 
     async def balance(self) -> BalanceInfo:
-        response = await self._http.get("/users/me/balance", headers=self._auth)
-        raise_for_status(response)
-        return BalanceInfo.model_validate(response.json())
+        async def _do() -> BalanceInfo:
+            response = await self._http.get("/users/me/balance", headers=self._auth)
+            raise_for_status(response)
+            return BalanceInfo.model_validate(response.json())
+
+        return await retry_async(self._retry, _do)
