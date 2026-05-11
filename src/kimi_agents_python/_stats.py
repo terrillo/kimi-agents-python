@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .types import Usage
+from .types import Usage, _cached_tokens_from
 
 
 @dataclass(slots=True)
@@ -29,12 +29,7 @@ class CacheStats:
             return
         self.requests += 1
         self.prompt_tokens += usage.prompt_tokens
-        nested = (
-            usage.prompt_tokens_details.cached_tokens
-            if usage.prompt_tokens_details is not None
-            else None
-        )
-        self.cached_tokens += nested if nested is not None else (usage.cached_tokens or 0)
+        self.cached_tokens += _cached_tokens_from(usage)
 
     def reset(self) -> None:
         self.requests = 0

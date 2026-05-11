@@ -6,6 +6,8 @@ import httpx
 
 from kimi_agents_python import (
     CacheStats,
+    ChatCompletion,
+    ChatCompletionChunk,
     KimiClient,
     Model,
     PromptTokensDetails,
@@ -48,6 +50,66 @@ def test_usage_nested_optional_when_absent() -> None:
         {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
     )
     assert u.prompt_tokens_details is None
+
+
+# --- per-call cached_tokens accessor ------------------------------------------
+
+
+def test_chat_completion_cached_tokens_prefers_nested() -> None:
+    c = ChatCompletion.model_validate(
+        _completion_with_usage(prompt=100, cached_nested=64, cached_legacy=999)
+    )
+    assert c.cached_tokens == 64
+
+
+def test_chat_completion_cached_tokens_legacy_fallback() -> None:
+    c = ChatCompletion.model_validate(_completion_with_usage(prompt=50, cached_legacy=32))
+    assert c.cached_tokens == 32
+
+
+def test_chat_completion_cached_tokens_zero_when_absent() -> None:
+    c = ChatCompletion.model_validate(_completion_with_usage(prompt=10))
+    assert c.cached_tokens == 0
+
+
+def test_chat_completion_cached_tokens_zero_when_usage_missing() -> None:
+    payload = _completion_with_usage(prompt=1)
+    del payload["usage"]
+    c = ChatCompletion.model_validate(payload)
+    assert c.usage is None
+    assert c.cached_tokens == 0
+
+
+def test_chat_completion_chunk_cached_tokens() -> None:
+    chunk = ChatCompletionChunk.model_validate(
+        {
+            "id": "x",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": Model.KIMI_K2_6.value,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 80,
+                "completion_tokens": 4,
+                "total_tokens": 84,
+                "prompt_tokens_details": {"cached_tokens": 50},
+            },
+        }
+    )
+    assert chunk.cached_tokens == 50
+
+
+def test_chat_completion_chunk_cached_tokens_zero_when_no_usage() -> None:
+    chunk = ChatCompletionChunk.model_validate(
+        {
+            "id": "x",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": Model.KIMI_K2_6.value,
+            "choices": [{"index": 0, "delta": {"content": "Hi"}}],
+        }
+    )
+    assert chunk.cached_tokens == 0
 
 
 # --- CacheStats record() -------------------------------------------------------

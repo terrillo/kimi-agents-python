@@ -134,6 +134,22 @@ class Usage(_Base):
     prompt_tokens_details: PromptTokensDetails | None = None
 
 
+def _cached_tokens_from(usage: Usage | None) -> int:
+    """Cached tokens from a Usage, preferring the nested wire location.
+
+    Returns 0 when ``usage`` is None or carries no cached-token info. Matches
+    the precedence used by :class:`CacheStats.record`.
+    """
+    if usage is None:
+        return 0
+    nested = (
+        usage.prompt_tokens_details.cached_tokens
+        if usage.prompt_tokens_details is not None
+        else None
+    )
+    return nested if nested is not None else (usage.cached_tokens or 0)
+
+
 class AssistantMessage(_Base):
     role: Role = Role.ASSISTANT
     content: str | None = None
@@ -154,6 +170,15 @@ class ChatCompletion(_Base):
     model: str
     choices: list[Choice]
     usage: Usage | None = None
+
+    @property
+    def cached_tokens(self) -> int:
+        """Cached prompt tokens for this response, or 0 when unreported.
+
+        Reads ``usage.prompt_tokens_details.cached_tokens`` and falls back to
+        the legacy top-level ``usage.cached_tokens`` for older payloads.
+        """
+        return _cached_tokens_from(self.usage)
 
 
 class ChoiceDelta(_Base):
@@ -176,6 +201,15 @@ class ChatCompletionChunk(_Base):
     model: str
     choices: list[StreamChoice]
     usage: Usage | None = None
+
+    @property
+    def cached_tokens(self) -> int:
+        """Cached prompt tokens carried by this chunk, or 0 when unreported.
+
+        Usage is normally only present on the final chunk (when the caller
+        passed ``stream_options={"include_usage": True}``).
+        """
+        return _cached_tokens_from(self.usage)
 
 
 class ModelInfo(_Base):

@@ -423,9 +423,16 @@ with KimiClient(prompt_cache_key="user-42-session-7") as client:
 ```
 
 - A per-call `prompt_cache_key=...` overrides the client default.
-- `usage.prompt_tokens_details.cached_tokens` is parsed when present (k2 wire format); the older top-level `usage.cached_tokens` is used as a fallback.
+- Per-call hits are available on the response: `completion.cached_tokens` (and `chunk.cached_tokens` for the final streaming chunk). The accessor reads `usage.prompt_tokens_details.cached_tokens` and falls back to the legacy top-level `usage.cached_tokens` for older payloads — so you don't have to remember the precedence yourself.
 - For streaming, stats only tick if the call asks for usage: `stream_options={"include_usage": True}`.
 - `client.cache_stats.reset()` zeros the counters.
+
+```python
+response = client.chat.create(model=Model.KIMI_K2_6, messages=[...])
+hit_ratio = response.cached_tokens / response.usage.prompt_tokens
+log.info("kimi turn: cached=%d / %d (%.1f%%)",
+         response.cached_tokens, response.usage.prompt_tokens, hit_ratio * 100)
+```
 
 ## Examples
 
