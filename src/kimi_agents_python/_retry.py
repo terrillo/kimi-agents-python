@@ -53,12 +53,11 @@ def _retry_after(exc: BaseException) -> float | None:
 def _compute_delay(
     attempt: int, cfg: RetryConfig, retry_after: float | None
 ) -> float:
-    if retry_after is not None and retry_after >= 0:
+    if retry_after is not None:
         return min(retry_after, cfg.max_delay)
-    base = cfg.initial_delay * (cfg.backoff_factor ** max(0, attempt - 1))
-    base = min(base, cfg.max_delay)
+    base = min(cfg.initial_delay * (cfg.backoff_factor ** (attempt - 1)), cfg.max_delay)
     if cfg.jitter > 0:
-        base = base * (1 + cfg.jitter * (2 * random.random() - 1))
+        base *= 1 + cfg.jitter * (2 * random.random() - 1)
     return max(0.0, base)
 
 

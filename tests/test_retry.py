@@ -104,7 +104,7 @@ def test_chat_retries_on_engine_overloaded(monkeypatch: pytest.MonkeyPatch) -> N
             )
         return httpx.Response(200, json=completion_body("recovered"))
 
-    with make_sync_client(handler, max_retries=3) as client:
+    with make_sync_client(handler, retries=3) as client:
         result = client.chat(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
@@ -130,7 +130,7 @@ def test_chat_exhausts_retries_and_raises(monkeypatch: pytest.MonkeyPatch) -> No
             },
         )
 
-    with make_sync_client(handler, max_retries=2) as client:
+    with make_sync_client(handler, retries=2) as client:
         with pytest.raises(EngineOverloadedError) as exc:
             client.chat(
                 model=Model.KIMI_K2_6,
@@ -153,7 +153,7 @@ def test_chat_does_not_retry_4xx_client_error(
             401, json={"error": {"type": "invalid_authentication_error", "message": "no"}}
         )
 
-    with make_sync_client(handler, max_retries=3) as client:
+    with make_sync_client(handler, retries=3) as client:
         with pytest.raises(KimiAuthenticationError):
             client.chat(
                 model=Model.KIMI_K2_6,
@@ -173,7 +173,7 @@ def test_chat_retries_on_5xx_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> N
             return httpx.Response(503, text="upstream busy")
         return httpx.Response(200, json=completion_body("ok"))
 
-    with make_sync_client(handler, max_retries=2) as client:
+    with make_sync_client(handler, retries=2) as client:
         result = client.chat(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
@@ -204,7 +204,7 @@ def test_chat_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch) -> None
             )
         return httpx.Response(200, json=completion_body())
 
-    with make_sync_client(handler, max_retries=2) as client:
+    with make_sync_client(handler, retries=2) as client:
         client.chat(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
 
     assert sleeps == [7.0]
@@ -236,7 +236,7 @@ def test_streaming_retries_open_phase(monkeypatch: pytest.MonkeyPatch) -> None:
             headers={"content-type": "text/event-stream"},
         )
 
-    with make_sync_client(handler, max_retries=3) as client:
+    with make_sync_client(handler, retries=3) as client:
         stream = client.chat(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
@@ -272,7 +272,7 @@ async def test_async_chat_retries_on_engine_overloaded(
             )
         return httpx.Response(200, json=completion_body("recovered"))
 
-    async with make_async_client(handler, max_retries=3) as client:
+    async with make_async_client(handler, retries=3) as client:
         result = await client.chat(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
