@@ -245,21 +245,7 @@ def _serialise_messages(messages: Sequence[dict | Any]) -> list[dict]:
 
 
 def _assistant_record(msg: Any) -> dict:
-    return {
-        "role": "assistant",
-        "content": msg.content,
-        "tool_calls": [
-            {
-                "id": tc.id,
-                "type": tc.type,
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            }
-            for tc in msg.tool_calls
-        ],
-    }
+    return msg.model_dump(exclude_none=True, by_alias=True, mode="json")
 
 
 def _tool_result_record(tc: Any, content: str) -> dict:

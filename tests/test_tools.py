@@ -296,10 +296,16 @@ def test_can_parallel_override_false() -> None:
 # -- client.chat() integration --------------------------------------------------
 
 
-def _completion_with(tool_calls: list[dict] | None = None, content: str | None = "ok") -> dict:
+def _completion_with(
+    tool_calls: list[dict] | None = None,
+    content: str | None = "ok",
+    reasoning_content: str | None = None,
+) -> dict:
     message: dict = {"role": "assistant", "content": content}
     if tool_calls is not None:
         message["tool_calls"] = tool_calls
+    if reasoning_content is not None:
+        message["reasoning_content"] = reasoning_content
     return {
         "id": "c-1",
         "object": "chat.completion",
@@ -672,3 +678,85 @@ async def test_arun_tools_returns_final_response() -> None:
             tools=[echo],
         )
     assert result.choices[0].message.content == "ok"
+
+
+def test_run_tools_preserves_reasoning_content_across_turns() -> None:
+    """kimi-k2-thinking requires prior reasoning_content in the next request."""
+
+    @kimi_tool
+    def echo(msg: str) -> str:
+        """Echo."""
+        return msg
+
+    tool_call = {
+        "id": "c1",
+        "type": "function",
+        "function": {"name": "echo", "arguments": '{"msg":"hi"}'},
+    }
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        if len(calls) == 1:
+            return httpx.Response(
+                200,
+                json=_completion_with(
+                    tool_calls=[tool_call],
+                    content=None,
+                    reasoning_content="Step 1: call echo with msg=hi",
+                ),
+            )
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    with make_sync_client(handler) as client:
+        run_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[echo],
+        )
+
+    assistant_msg = calls[1]["messages"][1]
+    assert assistant_msg["role"] == "assistant"
+    assert assistant_msg["reasoning_content"] == "Step 1: call echo with msg=hi"
+
+
+def test_run_tools_omits_reasoning_content_when_none() -> None:
+    """Non-thinking models don't return reasoning_content — wire payload stays clean."""
+
+    @kimi_tool
+    def echo(msg: str) -> str:
+        """Echo."""
+        return msg
+
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if len(calls) == 1:
+            return httpx.Response(
+                200,
+                json=_completion_with(
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "echo", "arguments": '{"msg":"hi"}'},
+                        }
+                    ],
+                    content=None,
+                ),
+            )
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    with make_sync_client(handler) as client:
+        run_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[echo],
+        )
+
+    assistant_msg = calls[1]["messages"][1]
+    assert "reasoning_content" not in assistant_msg

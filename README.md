@@ -118,7 +118,7 @@ Unknown model strings bypass validation so the client stays usable when the serv
 |---|---|---|
 | `kimi-k2.6` / `kimi-k2.5` | `kimi-k2.6`, `kimi-k2.5` | temp/top_p/n/penalties locked; `thinking` configurable; vision + video |
 | `kimi-k2` | `kimi-k2-0905-preview`, `kimi-k2-0711-preview`, `kimi-k2-turbo-preview` | flexible params; no thinking |
-| `kimi-k2-thinking` | `kimi-k2-thinking`, `kimi-k2-thinking-turbo` | always-on thinking; `temp=1.0` fixed |
+| `kimi-k2-thinking` | `kimi-k2-thinking`, `kimi-k2-thinking-turbo` | always-on thinking; `temp=1.0` fixed; `max_tokens` ≥ 16000 required |
 | `moonshot-v1` | 8k / 32k / 128k / auto + `-vision-preview` variants | `temp=0.0` default; vision variants accept images |
 
 ## Thinking models
@@ -167,6 +167,54 @@ for call in response.choices[0].message.tool_calls or []:
 ```
 
 See [`examples/05_tool_calling.py`](examples/05_tool_calling.py) for the full multi-turn loop that feeds tool results back to the model.
+
+### `@kimi_tool` + auto-loop
+
+Wrap a Python function with `@kimi_tool` and `run_tools` / `arun_tools` will drive the chat → tool_calls → result loop to completion for you. The decorator builds the JSON schema from the function signature, takes the first docstring line as the description, and JSON-encodes whatever the function returns.
+
+```python
+from typing import Annotated, Literal
+from pydantic import Field
+from kimi_agents_python import KimiClient, Model, kimi_tool, run_tools
+
+@kimi_tool
+def get_weather(
+    city: Annotated[str, Field(description="City name, e.g. 'Tokyo'")],
+    units: Literal["c", "f"] = "c",
+) -> dict:
+    """Get current weather for a city."""
+    return {"city": city, "temp": 21, "units": units}
+
+with KimiClient() as client:
+    result = run_tools(
+        client,
+        model=Model.KIMI_K2_0905_PREVIEW,
+        messages=[{"role": "user", "content": "Weather in Tokyo?"}],
+        tools=[get_weather],
+        max_steps=5,
+    )
+print(result.choices[0].message.content)
+```
+
+The auto-loop preserves `reasoning_content` across turns — required by `kimi-k2-thinking` per the [multi-step tool calls docs](https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#multi-step-tool-call). See [`examples/15_thinking_tools.py`](examples/15_thinking_tools.py).
+
+### Parallel tool dispatch (`can_parallel`)
+
+When the model returns multiple `tool_calls` in one turn, `arun_tools` partitions them: tools marked `can_parallel=True` (the default) run concurrently via `asyncio.gather`; tools marked `can_parallel=False` run sequentially after the parallel batch. Results are stitched back in the model's original `tool_calls` order, so subsequent turns see a deterministic transcript.
+
+Mark a tool non-parallel when it isn't safe to run alongside its siblings — e.g. it mutates shared state, holds a non-reentrant resource, or hits an API with strict per-tool rate limits.
+
+```python
+@kimi_tool                              # can_parallel=True (default)
+async def fetch_url(url: str) -> dict:
+    ...
+
+@kimi_tool(can_parallel=False)          # always runs sequentially
+async def append_to_log(entry: str) -> str:
+    ...
+```
+
+`can_parallel` is client-side metadata — it is **never** serialised onto the Kimi request body. The synchronous `run_tools` always dispatches sequentially regardless of the flag.
 
 ## Structured output (JSON schema)
 
@@ -343,7 +391,7 @@ with KimiClient(prompt_cache_key="user-42-session-7") as client:
 
 ## Examples
 
-The [`examples/`](examples/) directory has 14 self-contained scripts, each under 60 lines:
+The [`examples/`](examples/) directory has 15 self-contained scripts, each under 60 lines:
 
 ```bash
 uv run python examples/01_basic_chat.py
@@ -365,12 +413,13 @@ uv run python examples/01_basic_chat.py
 | `12_kimi_tool_decorator.py` | `@kimi_tool` + `run_tools` auto-loop |
 | `13_auto_retry.py` | `RetryConfig` for transient failures |
 | `14_prompt_caching.py` | `prompt_cache_key` + `cache_stats` |
+| `15_thinking_tools.py` | `kimi-k2-thinking` multi-step tool calls |
 
 ## Development
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 171 tests, <1s
+uv run pytest                      # 178 tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 

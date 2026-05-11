@@ -33,6 +33,7 @@ class ModelSpec:
     n_max: int = 5
     n_locked: bool = False
     penalty_locked: bool = False
+    max_tokens_min: int | None = None
 
     def validate_params(self, params: dict) -> None:
         """Raise ValueError if any kwarg in ``params`` violates this model's rules.
@@ -45,6 +46,7 @@ class ModelSpec:
         self._check_n(params)
         self._check_penalty(params)
         self._check_thinking(params)
+        self._check_max_tokens(params)
 
     def _check_locked(self, key: str, params: dict, locked: bool, default: float) -> None:
         if locked and key in params and params[key] != default:
@@ -78,6 +80,21 @@ class ModelSpec:
                 raise ValueError(
                     f"{self.id.value}: {key} is locked at 0; got {params[key]!r}."
                 )
+
+    def _check_max_tokens(self, params: dict) -> None:
+        if self.max_tokens_min is None:
+            return
+        value = params.get("max_tokens")
+        if value is None:
+            raise ValueError(
+                f"{self.id.value}: requires max_tokens >= {self.max_tokens_min} "
+                f"(reasoning_content + content share the budget); got no value."
+            )
+        if value < self.max_tokens_min:
+            raise ValueError(
+                f"{self.id.value}: requires max_tokens >= {self.max_tokens_min}; "
+                f"got {value}."
+            )
 
     def _check_thinking(self, params: dict) -> None:
         if "thinking" not in params:
@@ -139,6 +156,7 @@ MODEL_SPECS: dict[Model, ModelSpec] = {
         context_length=262_144,
         thinking_support=ThinkingSupport.ALWAYS_ON,
         temperature_default=1.0,
+        max_tokens_min=16_000,
     ),
     Model.KIMI_K2_THINKING_TURBO: ModelSpec(
         id=Model.KIMI_K2_THINKING_TURBO,
@@ -146,6 +164,7 @@ MODEL_SPECS: dict[Model, ModelSpec] = {
         context_length=262_144,
         thinking_support=ThinkingSupport.ALWAYS_ON,
         temperature_default=1.0,
+        max_tokens_min=16_000,
     ),
     Model.MOONSHOT_V1_8K: ModelSpec(
         id=Model.MOONSHOT_V1_8K,

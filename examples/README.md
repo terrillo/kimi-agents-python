@@ -28,6 +28,7 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 | 12 | [`12_kimi_tool_decorator.py`](12_kimi_tool_decorator.py) | `@kimi_tool` + `run_tools` auto-loop |
 | 13 | [`13_auto_retry.py`](13_auto_retry.py) | Default + custom `RetryConfig` for 429 / 5xx |
 | 14 | [`14_prompt_caching.py`](14_prompt_caching.py) | `prompt_cache_key` default + `cache_stats` |
+| 15 | [`15_thinking_tools.py`](15_thinking_tools.py) | `kimi-k2-thinking` multi-step tool calls (`run_tools` preserves `reasoning_content`) |
 
 ## Notes
 

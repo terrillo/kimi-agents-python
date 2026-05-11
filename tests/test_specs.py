@@ -57,6 +57,37 @@ def test_k2_thinking_always_on_cannot_be_configured() -> None:
         spec.validate_params({"thinking": {"type": "disabled"}})
 
 
+def test_k2_thinking_requires_max_tokens_floor() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_THINKING]
+    with pytest.raises(ValueError, match="max_tokens >= 16000"):
+        spec.validate_params({"max_tokens": 4_000})
+
+
+def test_k2_thinking_requires_max_tokens_present() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_THINKING]
+    with pytest.raises(ValueError, match="max_tokens >= 16000"):
+        spec.validate_params({})
+
+
+def test_k2_thinking_accepts_floor_value() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_THINKING]
+    spec.validate_params({"max_tokens": 16_000})
+    spec.validate_params({"max_tokens": 32_000})
+
+
+def test_k2_thinking_turbo_shares_floor() -> None:
+    spec = MODEL_SPECS[Model.KIMI_K2_THINKING_TURBO]
+    with pytest.raises(ValueError, match="max_tokens >= 16000"):
+        spec.validate_params({"max_tokens": 100})
+
+
+def test_non_thinking_models_have_no_max_tokens_floor() -> None:
+    """Models without max_tokens_min set must accept any value (including absent)."""
+    spec = MODEL_SPECS[Model.KIMI_K2_0905_PREVIEW]
+    spec.validate_params({})
+    spec.validate_params({"max_tokens": 1})
+
+
 def test_k2_series_allows_temperature_and_penalty() -> None:
     spec = MODEL_SPECS[Model.KIMI_K2_0905_PREVIEW]
     spec.validate_params({"temperature": 0.4, "presence_penalty": 0.5, "n": 3})
