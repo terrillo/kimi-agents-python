@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable, Iterator
 from types import TracebackType
-from typing import Any, ClassVar, overload
+from typing import Any, ClassVar, Literal, overload
 
 import httpx
 
@@ -10,11 +10,12 @@ from ._enums import AVAILABLE_MODELS, Model
 from ._http import (
     DEFAULT_BASE_URL,
     DEFAULT_TIMEOUT,
-    auth_headers,
+    bearer_headers,
     parse_sse_line,
     raise_for_status,
     resolve_api_key,
 )
+from .specs import get_model_spec
 from .types import (
     BalanceInfo,
     ChatCompletion,
@@ -36,6 +37,9 @@ def _build_request_body(
     stream: bool,
     extra: dict[str, Any],
 ) -> dict[str, Any]:
+    spec = get_model_spec(model)
+    if spec is not None:
+        spec.validate_params(extra)
     payload: dict[str, Any] = {
         "model": str(model),
         "messages": list(messages),
@@ -63,14 +67,12 @@ class KimiClient:
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
+        self._auth = bearer_headers(self._api_key)
         self._owns_client = http_client is None
         self._http = http_client or httpx.Client(
             base_url=self._base_url,
             timeout=timeout,
-            headers=auth_headers(self._api_key),
         )
-        if not self._owns_client:
-            self._http.headers.update(auth_headers(self._api_key))
 
     def close(self) -> None:
         if self._owns_client:
@@ -93,7 +95,7 @@ class KimiClient:
         *,
         model: Model | str,
         messages: Iterable[_MessageInput],
-        stream: bool = False,
+        stream: Literal[False] = False,
         **params: Any,
     ) -> ChatCompletion: ...
 
@@ -103,7 +105,7 @@ class KimiClient:
         *,
         model: Model | str,
         messages: Iterable[_MessageInput],
-        stream: bool,
+        stream: Literal[True],
         **params: Any,
     ) -> Iterator[ChatCompletionChunk]: ...
 
@@ -120,12 +122,14 @@ class KimiClient:
         )
         if stream:
             return self._stream_chat(body)
-        response = self._http.post("/chat/completions", json=body)
+        response = self._http.post("/chat/completions", json=body, headers=self._auth)
         raise_for_status(response)
         return ChatCompletion.model_validate(response.json())
 
     def _stream_chat(self, body: dict[str, Any]) -> Iterator[ChatCompletionChunk]:
-        with self._http.stream("POST", "/chat/completions", json=body) as response:
+        with self._http.stream(
+            "POST", "/chat/completions", json=body, headers=self._auth
+        ) as response:
             if response.status_code >= 400:
                 response.read()
                 raise_for_status(response)
@@ -136,7 +140,7 @@ class KimiClient:
                 yield ChatCompletionChunk.model_validate(chunk)
 
     def list_models(self) -> list[ModelInfo]:
-        response = self._http.get("/models")
+        response = self._http.get("/models", headers=self._auth)
         raise_for_status(response)
         return ModelList.model_validate(response.json()).data
 
@@ -144,12 +148,14 @@ class KimiClient:
         self, *, model: Model | str, messages: Iterable[_MessageInput]
     ) -> TokenEstimate:
         body = {"model": str(model), "messages": list(messages)}
-        response = self._http.post("/tokenizers/estimate-token-count", json=body)
+        response = self._http.post(
+            "/tokenizers/estimate-token-count", json=body, headers=self._auth
+        )
         raise_for_status(response)
         return TokenEstimate.model_validate(response.json())
 
     def balance(self) -> BalanceInfo:
-        response = self._http.get("/users/me/balance")
+        response = self._http.get("/users/me/balance", headers=self._auth)
         raise_for_status(response)
         return BalanceInfo.model_validate(response.json())
 
@@ -170,14 +176,12 @@ class AsyncKimiClient:
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
+        self._auth = bearer_headers(self._api_key)
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(
             base_url=self._base_url,
             timeout=timeout,
-            headers=auth_headers(self._api_key),
         )
-        if not self._owns_client:
-            self._http.headers.update(auth_headers(self._api_key))
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -194,6 +198,26 @@ class AsyncKimiClient:
     ) -> None:
         await self.aclose()
 
+    @overload
+    async def chat(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        stream: Literal[False] = False,
+        **params: Any,
+    ) -> ChatCompletion: ...
+
+    @overload
+    async def chat(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        stream: Literal[True],
+        **params: Any,
+    ) -> AsyncIterator[ChatCompletionChunk]: ...
+
     async def chat(
         self,
         *,
@@ -207,14 +231,18 @@ class AsyncKimiClient:
         )
         if stream:
             return self._stream_chat(body)
-        response = await self._http.post("/chat/completions", json=body)
+        response = await self._http.post(
+            "/chat/completions", json=body, headers=self._auth
+        )
         raise_for_status(response)
         return ChatCompletion.model_validate(response.json())
 
     async def _stream_chat(
         self, body: dict[str, Any]
     ) -> AsyncIterator[ChatCompletionChunk]:
-        async with self._http.stream("POST", "/chat/completions", json=body) as response:
+        async with self._http.stream(
+            "POST", "/chat/completions", json=body, headers=self._auth
+        ) as response:
             if response.status_code >= 400:
                 await response.aread()
                 raise_for_status(response)
@@ -225,7 +253,7 @@ class AsyncKimiClient:
                 yield ChatCompletionChunk.model_validate(chunk)
 
     async def list_models(self) -> list[ModelInfo]:
-        response = await self._http.get("/models")
+        response = await self._http.get("/models", headers=self._auth)
         raise_for_status(response)
         return ModelList.model_validate(response.json()).data
 
@@ -233,11 +261,13 @@ class AsyncKimiClient:
         self, *, model: Model | str, messages: Iterable[_MessageInput]
     ) -> TokenEstimate:
         body = {"model": str(model), "messages": list(messages)}
-        response = await self._http.post("/tokenizers/estimate-token-count", json=body)
+        response = await self._http.post(
+            "/tokenizers/estimate-token-count", json=body, headers=self._auth
+        )
         raise_for_status(response)
         return TokenEstimate.model_validate(response.json())
 
     async def balance(self) -> BalanceInfo:
-        response = await self._http.get("/users/me/balance")
+        response = await self._http.get("/users/me/balance", headers=self._auth)
         raise_for_status(response)
         return BalanceInfo.model_validate(response.json())

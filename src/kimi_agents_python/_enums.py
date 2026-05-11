@@ -51,3 +51,18 @@ class ResponseFormatType(StrEnum):
 class ToolChoice(StrEnum):
     AUTO = "auto"
     NONE = "none"
+
+
+class FilePurpose(StrEnum):
+    FILE_EXTRACT = "file-extract"
+    IMAGE = "image"
+    VIDEO = "video"
+    BATCH = "batch"
+
+
+class ThinkingSupport(StrEnum):
+    """How a model exposes the ``thinking`` capability to callers."""
+
+    NONE = "none"
+    CONFIGURABLE = "configurable"
+    ALWAYS_ON = "always_on"

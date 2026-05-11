@@ -18,9 +18,6 @@ class _Base(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True, use_enum_values=True)
 
 
-# --- Content parts (multimodal) -------------------------------------------------
-
-
 class TextPart(_Base):
     type: Literal["text"] = "text"
     text: str
@@ -50,9 +47,6 @@ ContentPart = Annotated[
 ]
 
 
-# --- Tool calls -----------------------------------------------------------------
-
-
 class FunctionCall(_Base):
     name: str
     arguments: str  # JSON-encoded string per the API
@@ -76,9 +70,6 @@ class ToolDef(_Base):
     function: FunctionDef
 
 
-# --- Messages -------------------------------------------------------------------
-
-
 class Message(_Base):
     role: Role
     content: str | list[ContentPart] | None = None
@@ -87,9 +78,6 @@ class Message(_Base):
     tool_call_id: str | None = None
     tool_calls: list[ToolCall] | None = None
     reasoning_content: str | None = None
-
-
-# --- Request-side feature configs -----------------------------------------------
 
 
 class ThinkingConfig(_Base):
@@ -112,9 +100,6 @@ class StreamOptions(_Base):
     include_usage: bool | None = None
 
 
-# --- Chat completion request ----------------------------------------------------
-
-
 class ChatCompletionRequest(_Base):
     model: Model | str
     messages: list[Message]
@@ -133,9 +118,6 @@ class ChatCompletionRequest(_Base):
     prompt_cache_key: str | None = None
     safety_identifier: str | None = None
     thinking: ThinkingConfig | None = None
-
-
-# --- Chat completion response ---------------------------------------------------
 
 
 class Usage(_Base):
@@ -167,9 +149,6 @@ class ChatCompletion(_Base):
     usage: Usage | None = None
 
 
-# --- Streaming chunks -----------------------------------------------------------
-
-
 class ChoiceDelta(_Base):
     role: Role | None = None
     content: str | None = None
@@ -190,9 +169,6 @@ class ChatCompletionChunk(_Base):
     model: str
     choices: list[StreamChoice]
     usage: Usage | None = None
-
-
-# --- Auxiliary endpoints --------------------------------------------------------
 
 
 class ModelInfo(_Base):
