@@ -324,7 +324,7 @@ response = client.chat.create(
 body = PREFILL + response.choices[0].message.content
 ```
 
-## Vision and files
+## Vision
 
 Multimodal models accept `image_url` and `video_url` content parts (base64 or `ms://<file_id>` references):
 
@@ -343,7 +343,30 @@ response = client.chat.create(
 )
 ```
 
-Pre-upload format and size checks ship with the package — useful before sending bytes to the files API:
+The `ms://<file_id>` form references a file uploaded via `client.files.create(...)` — see the [Files](#files) section below.
+
+## Files
+
+Upload, list, fetch extracted content, and delete:
+
+```python
+from pathlib import Path
+from kimi_agents_python import FilePurpose, KimiClient
+
+with KimiClient() as client:
+    f = client.files.create(file=Path("report.pdf"), purpose=FilePurpose.FILE_EXTRACT)
+    text = client.files.content(f.id).text   # extracted text
+
+    client.files.list()                       # list[FileObject]
+    client.files.retrieve(f.id)               # FileObject
+    client.files.delete(f.id)                 # FileDeleted
+```
+
+`client.files.create(file=...)` accepts a path (`str` / `Path`) or a `(filename, bytes)` tuple for in-memory uploads. Paths are streamed from disk via `path.open("rb")` rather than loaded into memory. Path uploads with a known `FilePurpose` are checked against `validate_file()` before the HTTP call.
+
+### Pre-upload validation
+
+Format and size checks ship with the package — useful when accepting user-supplied files:
 
 ```python
 from kimi_agents_python import (
@@ -370,22 +393,7 @@ validate_file("clip.mp4", FilePurpose.IMAGE)    # raises ValueError
 
 Constants: `MAX_FILE_BYTES = 100 MiB`, `MAX_TOTAL_BYTES = 10 GiB`, `MAX_FILES = 1000`.
 
-## Files
-
-```python
-from pathlib import Path
-from kimi_agents_python import FilePurpose, KimiClient
-
-with KimiClient() as client:
-    f = client.files.create(file=Path("report.pdf"), purpose=FilePurpose.FILE_EXTRACT)
-    text = client.files.content(f.id).text   # extracted text
-
-    client.files.list()                       # list[FileObject]
-    client.files.retrieve(f.id)               # FileObject
-    client.files.delete(f.id)                 # FileDeleted
-```
-
-`client.files.create(file=...)` accepts a path (`str` / `Path`) or a `(filename, bytes)` tuple for in-memory uploads. Path uploads with a known `FilePurpose` are checked against `validate_file()` before the HTTP call.
+The same surface lives under `AsyncKimiClient` — every method is a coroutine.
 
 ## Batches
 
@@ -407,6 +415,8 @@ with KimiClient() as client:
 ```
 
 `batch.status` is a `BatchStatus` (`validating` → `in_progress` → `finalizing` → `completed` | `failed` | `expired` | `cancelled`). When complete, `batch.output_file_id` points at a JSONL result file you fetch with `client.files.content(...)`.
+
+The same surface lives under `AsyncKimiClient` — every method is a coroutine.
 
 ## Helper endpoints
 
@@ -465,6 +475,19 @@ try:
 except ThinkingIncompatibilityError as e:
     print(e)  # exact field combination + suggested fix
 ```
+
+### Tool-loop terminations
+
+`run_tools` / `arun_tools` raise `KimiToolLoopError` (or a subclass) when a budget runs out. The base class catches every termination reason uniformly; the subclasses let you react differently.
+
+| Class | Triggered by |
+|---|---|
+| `KimiToolLoopError` | `max_steps` exhausted (raised directly), or any of the subclasses below |
+| `TokenBudgetExceededError` | `LoopGuards.max_tokens` crossed |
+| `ReadOnlyStreakExceededError` | `LoopGuards.read_only_streak` consecutive read-only calls without a mutating call |
+| `RepeatedToolCallError` | `LoopGuards.repeat_threshold` consecutive identical calls |
+
+See the [Loop guards](#loop-guards-loopguards) section for configuration.
 
 ## Auto-retry
 
