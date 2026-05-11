@@ -102,10 +102,14 @@ class KimiTool:
     is_async: bool
     strict: bool
     can_parallel: bool
+    """Client-side metadata; never serialised onto the Kimi request body.
+    Read by :func:`arun_tools` to decide which calls in a turn go into
+    ``asyncio.gather`` and which run sequentially."""
     failure_error_function: Callable[[Exception], str] | None
     args_model: type[BaseModel] = field(repr=False)
 
     def to_tool_def(self) -> ToolDef:
+        """Build the wire-format ToolDef. ``can_parallel`` is intentionally omitted."""
         return ToolDef(
             function=FunctionDef(
                 name=self.name,
@@ -313,12 +317,14 @@ async def arun_tools(
     max_steps: int = 5,
     **chat_kwargs: Any,
 ) -> ChatCompletion:
-    """Async equivalent of :func:`run_tools`.
+    """Async equivalent of :func:`run_tools` with partitioned parallel dispatch.
 
-    When a single turn returns multiple ``tool_calls`` and every resolved tool
-    has ``can_parallel=True``, the calls are dispatched concurrently via
-    :func:`asyncio.gather`. If any tool sets ``can_parallel=False`` they run
-    sequentially, preserving the original ``tool_calls`` order in the transcript.
+    Each turn's ``tool_calls`` are split into two buckets: every call whose
+    resolved tool has ``can_parallel=True`` is dispatched concurrently in a
+    single :func:`asyncio.gather`, then any remaining calls (``can_parallel=False``
+    tools and unknown tool names) run sequentially. Results are appended to the
+    transcript in the model's original ``tool_calls`` order regardless of
+    dispatch order, so subsequent turns see a deterministic conversation.
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
@@ -332,23 +338,30 @@ async def arun_tools(
         convo.append(_assistant_record(msg))
 
         resolved = [(tc, registry.get(tc.function.name)) for tc in msg.tool_calls]
-        results: list[str]
-        run_parallel = len(resolved) > 1 and all(
-            t is not None and t.can_parallel for _, t in resolved
-        )
-        if run_parallel:
-            coros: list[Awaitable[str]] = [
-                t.ainvoke(tc.function.arguments) for tc, t in resolved  # type: ignore[union-attr]
-            ]
-            results = list(await asyncio.gather(*coros))
-        else:
-            results = []
-            for tc, t in resolved:
-                if t is None:
-                    results.append(f"Unknown tool: {tc.function.name}")
-                else:
-                    results.append(await t.ainvoke(tc.function.arguments))
+        results: list[str | None] = [None] * len(resolved)
+
+        parallel_indices: list[int] = []
+        parallel_coros: list[Awaitable[str]] = []
+        serial_indices: list[int] = []
+        for idx, (tc, t) in enumerate(resolved):
+            if t is not None and t.can_parallel:
+                parallel_indices.append(idx)
+                parallel_coros.append(t.ainvoke(tc.function.arguments))
+            else:
+                serial_indices.append(idx)
+
+        if parallel_coros:
+            batch = await asyncio.gather(*parallel_coros)
+            for idx, content in zip(parallel_indices, batch):
+                results[idx] = content
+
+        for idx in serial_indices:
+            tc, t = resolved[idx]
+            if t is None:
+                results[idx] = f"Unknown tool: {tc.function.name}"
+            else:
+                results[idx] = await t.ainvoke(tc.function.arguments)
 
         for (tc, _), content in zip(resolved, results):
-            convo.append(_tool_result_record(tc, content))
+            convo.append(_tool_result_record(tc, content or ""))
     raise KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")

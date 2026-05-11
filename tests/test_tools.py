@@ -138,6 +138,43 @@ def test_to_tool_def_shape() -> None:
     assert td.function.parameters["properties"]["city"]["type"] == "string"
 
 
+def test_to_tool_def_omits_can_parallel_from_serialised_form() -> None:
+    """can_parallel is client-side metadata only; must never reach the wire."""
+
+    @kimi_tool(can_parallel=False)
+    def fn(x: int) -> int:
+        """Doc."""
+        return x
+
+    blob = fn.to_tool_def().model_dump(by_alias=True, exclude_none=True)
+    assert "can_parallel" not in json.dumps(blob)
+
+
+def test_request_body_to_kimi_omits_can_parallel() -> None:
+    """Even when a KimiTool with can_parallel=False is passed to chat(),
+    the outbound request body has no can_parallel key anywhere."""
+
+    @kimi_tool(can_parallel=False)
+    def fn(x: int) -> int:
+        """Doc."""
+        return x
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=_completion_with(content="hello"))
+
+    with make_sync_client(handler) as client:
+        client.chat(
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[fn],
+        )
+
+    assert "can_parallel" not in json.dumps(captured["body"])
+
+
 # -- invoke / ainvoke -----------------------------------------------------------
 
 
@@ -492,25 +529,26 @@ async def test_arun_tools_parallel_dispatch_when_all_can_parallel() -> None:
     )
 
 
-async def test_arun_tools_sequential_when_one_tool_disallows_parallel() -> None:
-    starts: list[tuple[str, float]] = []
-    ends: list[tuple[str, float]] = []
+async def test_arun_tools_partitions_parallel_from_serial() -> None:
+    """Parallel-capable tools run via gather; serial tool runs sequentially after."""
+    starts: dict[str, float] = {}
+    ends: dict[str, float] = {}
 
-    @kimi_tool(can_parallel=False)
-    async def slow_a() -> str:
-        """Doc."""
-        starts.append(("a", time.perf_counter()))
+    async def record(name: str) -> str:
+        starts[name] = time.perf_counter()
         await asyncio.sleep(0.05)
-        ends.append(("a", time.perf_counter()))
-        return "a-done"
+        ends[name] = time.perf_counter()
+        return f"{name}-done"
 
     @kimi_tool
+    async def slow_a() -> str:
+        """Doc."""
+        return await record("a")
+
+    @kimi_tool(can_parallel=False)
     async def slow_b() -> str:
         """Doc."""
-        starts.append(("b", time.perf_counter()))
-        await asyncio.sleep(0.05)
-        ends.append(("b", time.perf_counter()))
-        return "b-done"
+        return await record("b")
 
     step = 0
 
@@ -529,10 +567,74 @@ async def test_arun_tools_sequential_when_one_tool_disallows_parallel() -> None:
             tools=[slow_a, slow_b],
         )
 
-    # b starts strictly after a ends → sequential.
-    a_end = next(t for name, t in ends if name == "a")
-    b_start = next(t for name, t in starts if name == "b")
-    assert b_start >= a_end
+    # Strategy A: parallel bucket first (a alone), then serial bucket (b).
+    assert starts["b"] >= ends["a"], (
+        f"expected serial-bucket b to start after parallel-bucket a finished: "
+        f"a_end={ends['a']}, b_start={starts['b']}"
+    )
+
+
+async def test_arun_tools_three_tool_partition_proves_parallelism() -> None:
+    """Two parallel-capable tools overlap; a serial tool does not overlap them."""
+    starts: dict[str, float] = {}
+    ends: dict[str, float] = {}
+
+    async def record(name: str) -> str:
+        starts[name] = time.perf_counter()
+        await asyncio.sleep(0.05)
+        ends[name] = time.perf_counter()
+        return f"{name}-done"
+
+    @kimi_tool
+    async def p1() -> str:
+        """Doc."""
+        return await record("p1")
+
+    @kimi_tool
+    async def p2() -> str:
+        """Doc."""
+        return await record("p2")
+
+    @kimi_tool(can_parallel=False)
+    async def s1() -> str:
+        """Doc."""
+        return await record("s1")
+
+    three_calls = _completion_with(
+        tool_calls=[
+            {"id": "c1", "type": "function",
+             "function": {"name": "p1", "arguments": "{}"}},
+            {"id": "c2", "type": "function",
+             "function": {"name": "s1", "arguments": "{}"}},
+            {"id": "c3", "type": "function",
+             "function": {"name": "p2", "arguments": "{}"}},
+        ],
+        content=None,
+    )
+
+    step = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal step
+        step += 1
+        if step == 1:
+            return httpx.Response(200, json=three_calls)
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    async with make_async_client(handler) as client:
+        await arun_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[p1, p2, s1],
+        )
+
+    # p1 and p2 overlap (max start < min end).
+    assert max(starts["p1"], starts["p2"]) < min(ends["p1"], ends["p2"]), (
+        f"expected p1 and p2 to overlap; starts={starts}, ends={ends}"
+    )
+    # s1 runs in the serial bucket, after both parallel tools have finished.
+    assert starts["s1"] >= max(ends["p1"], ends["p2"])
 
 
 async def test_arun_tools_returns_final_response() -> None:
