@@ -23,7 +23,10 @@ class CacheStats:
     def hit_ratio(self) -> float:
         return self.cached_tokens / self.prompt_tokens if self.prompt_tokens else 0.0
 
-    def record(self, usage: Usage) -> None:
+    def record(self, usage: Usage | None) -> None:
+        """Accumulate one chat usage record; ``None`` is a no-op."""
+        if usage is None:
+            return
         self.requests += 1
         self.prompt_tokens += usage.prompt_tokens
         nested = (

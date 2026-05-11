@@ -123,7 +123,7 @@ def test_default_prompt_cache_key_injected() -> None:
         retries=0,
         prompt_cache_key="session-abc",
     ) as client:
-        client.chat(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
+        client.chat.create(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
 
     assert captured["body"]["prompt_cache_key"] == "session-abc"
 
@@ -145,7 +145,7 @@ def test_per_call_prompt_cache_key_overrides_default() -> None:
         retries=0,
         prompt_cache_key="default-key",
     ) as client:
-        client.chat(
+        client.chat.create(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
             prompt_cache_key="per-call-key",
@@ -162,7 +162,7 @@ def test_no_default_means_no_key_sent() -> None:
         return httpx.Response(200, json=completion_body())
 
     with make_sync_client(handler) as client:
-        client.chat(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
+        client.chat.create(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
 
     assert "prompt_cache_key" not in captured["body"]
 
@@ -177,8 +177,8 @@ def test_chat_records_stats() -> None:
         )
 
     with make_sync_client(handler) as client:
-        client.chat(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
-        client.chat(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "y"}])
+        client.chat.create(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
+        client.chat.create(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "y"}])
 
     assert client.cache_stats.requests == 2
     assert client.cache_stats.prompt_tokens == 200
@@ -193,7 +193,7 @@ def test_chat_records_stats_with_legacy_field() -> None:
         )
 
     with make_sync_client(handler) as client:
-        client.chat(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
+        client.chat.create(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
 
     assert client.cache_stats.cached_tokens == 25
 
@@ -229,7 +229,7 @@ def test_streaming_records_stats_from_final_chunk() -> None:
 
     with make_sync_client(handler) as client:
         list(
-            client.chat(
+            client.chat.create(
                 model=Model.KIMI_K2_6,
                 messages=[{"role": "user", "content": "x"}],
                 stream=True,
@@ -250,7 +250,7 @@ def test_failed_chat_does_not_record_stats() -> None:
 
     with make_sync_client(handler) as client:
         try:
-            client.chat(
+            client.chat.create(
                 model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}]
             )
         except Exception:
@@ -263,7 +263,7 @@ def test_clients_have_independent_stats() -> None:
         return httpx.Response(200, json=_completion_with_usage(prompt=10, cached_nested=5))
 
     with make_sync_client(handler) as a, make_sync_client(handler) as b:
-        a.chat(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
+        a.chat.create(model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}])
         assert a.cache_stats.requests == 1
         assert b.cache_stats.requests == 0
 
@@ -292,7 +292,7 @@ async def test_async_chat_records_stats_and_default_key() -> None:
         retries=0,
         prompt_cache_key="async-sess",
     ) as client:
-        await client.chat(
+        await client.chat.create(
             model=Model.KIMI_K2_6, messages=[{"role": "user", "content": "x"}]
         )
 

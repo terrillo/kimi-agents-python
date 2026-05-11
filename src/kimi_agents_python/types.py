@@ -5,6 +5,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ._enums import (
+    BatchStatus,
+    FilePurpose,
     FinishReason,
     Model,
     ResponseFormatType,
@@ -211,3 +213,58 @@ class TokenEstimateData(_Base):
 
 class TokenEstimate(_Base):
     data: TokenEstimateData
+
+
+class FileObject(_Base):
+    id: str
+    object: Literal["file"] = "file"
+    bytes: int
+    created_at: int
+    filename: str
+    purpose: FilePurpose
+    status: str
+    status_details: str | None = None
+
+
+class FileList(_Base):
+    object: Literal["list"] = "list"
+    data: list[FileObject]
+
+
+class FileDeleted(_Base):
+    id: str
+    object: Literal["file"] = "file"
+    deleted: bool
+
+
+class BatchRequestCounts(_Base):
+    completed: int = 0
+    failed: int = 0
+    total: int = 0
+
+
+class Batch(_Base):
+    id: str
+    object: Literal["batch"] = "batch"
+    endpoint: str
+    input_file_id: str
+    completion_window: str
+    status: BatchStatus
+    output_file_id: str | None = None
+    error_file_id: str | None = None
+    created_at: int
+    in_progress_at: int | None = None
+    expires_at: int | None = None
+    finalizing_at: int | None = None
+    completed_at: int | None = None
+    failed_at: int | None = None
+    cancelling_at: int | None = None
+    cancelled_at: int | None = None
+    request_counts: BatchRequestCounts | None = None
+    metadata: dict[str, str] | None = None
+
+
+class BatchList(_Base):
+    object: Literal["list"] = "list"
+    data: list[Batch]
+    has_more: bool = False

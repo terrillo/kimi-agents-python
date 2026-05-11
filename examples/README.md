@@ -22,13 +22,15 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 | 06 | [`06_vision.py`](06_vision.py) | Base64 image input (pass a local image path) |
 | 07 | [`07_json_schema.py`](07_json_schema.py) | Structured output via `response_format=json_schema` |
 | 08 | [`08_partial_mode.py`](08_partial_mode.py) | Prefilling the assistant message |
-| 09 | [`09_helpers.py`](09_helpers.py) | `list_models()`, `estimate_tokens()`, `balance()` |
+| 09 | [`09_helpers.py`](09_helpers.py) | `client.models.list()`, `client.tokenizers.estimate()`, `client.account.balance()` |
 | 10 | [`10_file_validation.py`](10_file_validation.py) | Pre-upload format checks (no API call) |
 | 11 | [`11_error_handling.py`](11_error_handling.py) | Typed `error.type` subclasses + client-side validation |
 | 12 | [`12_kimi_tool_decorator.py`](12_kimi_tool_decorator.py) | `@kimi_tool` + `run_tools` auto-loop |
 | 13 | [`13_auto_retry.py`](13_auto_retry.py) | Default + custom `RetryConfig` for 429 / 5xx |
 | 14 | [`14_prompt_caching.py`](14_prompt_caching.py) | `prompt_cache_key` default + `cache_stats` |
 | 15 | [`15_thinking_tools.py`](15_thinking_tools.py) | `kimi-k2-thinking` multi-step tool calls (`run_tools` preserves `reasoning_content`) |
+| 16 | [`16_files.py`](16_files.py) | `client.files` upload, extract content, chat over it, delete |
+| 17 | [`17_batches.py`](17_batches.py) | `client.batches` create + poll + fetch JSONL results |
 
 ## Notes
 

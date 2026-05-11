@@ -7,7 +7,7 @@ from kimi_agents_python import KimiClient, Model
 PREFILL = "{"
 
 with KimiClient() as client:
-    response = client.chat(
+    response = client.chat.create(
         model=Model.KIMI_K2_0905_PREVIEW,
         messages=[
             {"role": "user", "content": "List three Python web frameworks."},

@@ -276,7 +276,7 @@ def run_tools(
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     for _ in range(max_steps):
-        response = client.chat(
+        response = client.chat.create(
             model=model, messages=convo, tools=list(tools), **chat_kwargs
         )
         msg = response.choices[0].message
@@ -315,7 +315,7 @@ async def arun_tools(
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     for _ in range(max_steps):
-        response = await client.chat(
+        response = await client.chat.create(
             model=model, messages=convo, tools=list(tools), **chat_kwargs
         )
         msg = response.choices[0].message

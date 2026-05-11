@@ -12,7 +12,7 @@ from kimi_agents_python import (
 #    surfaces as InvalidAuthenticationError (subclass of KimiAuthenticationError).
 with KimiClient(api_key="sk-not-a-real-key") as client:
     try:
-        client.chat(
+        client.chat.create(
             model=Model.KIMI_K2_0905_PREVIEW,
             messages=[{"role": "user", "content": "hi"}],
         )
@@ -27,7 +27,7 @@ with KimiClient(api_key="sk-not-a-real-key") as client:
 # 2. Client-side validation runs BEFORE any HTTP call and raises ValueError.
 with KimiClient(api_key="sk-not-a-real-key") as client:
     try:
-        client.chat(
+        client.chat.create(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
             temperature=0.3,  # k2.6 locks temperature at 1.0

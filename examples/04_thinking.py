@@ -3,7 +3,7 @@
 from kimi_agents_python import KimiClient, Model
 
 with KimiClient() as client:
-    response = client.chat(
+    response = client.chat.create(
         model=Model.KIMI_K2_6,
         messages=[
             {"role": "user", "content": "If x*x = 2x + 35 and x > 0, what is x?"}

@@ -6,7 +6,7 @@ from kimi_agents_python import KimiClient, Model, RetryConfig
 #    backoff and jitter. Honors a numeric Retry-After header when the API
 #    sends one. Nothing to configure for the common case.
 with KimiClient() as client:
-    response = client.chat(
+    response = client.chat.create(
         model=Model.KIMI_K2_0905_PREVIEW,
         messages=[{"role": "user", "content": "ping"}],
     )
@@ -22,7 +22,7 @@ custom = RetryConfig(
     jitter=0.25,
 )
 with KimiClient(retries=custom) as client:
-    response = client.chat(
+    response = client.chat.create(
         model=Model.KIMI_K2_0905_PREVIEW,
         messages=[{"role": "user", "content": "ping"}],
     )
@@ -30,7 +30,7 @@ with KimiClient(retries=custom) as client:
 
 # 3. Disable retries entirely (e.g., for tests that want raw errors).
 with KimiClient(retries=0) as client:
-    response = client.chat(
+    response = client.chat.create(
         model=Model.KIMI_K2_0905_PREVIEW,
         messages=[{"role": "user", "content": "ping"}],
     )

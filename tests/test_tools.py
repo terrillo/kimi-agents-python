@@ -166,7 +166,7 @@ def test_request_body_to_kimi_omits_can_parallel() -> None:
         return httpx.Response(200, json=_completion_with(content="hello"))
 
     with make_sync_client(handler) as client:
-        client.chat(
+        client.chat.create(
             model=Model.KIMI_K2_0905_PREVIEW,
             messages=[{"role": "user", "content": "?"}],
             tools=[fn],
@@ -293,7 +293,7 @@ def test_can_parallel_override_false() -> None:
     assert fn.can_parallel is False
 
 
-# -- client.chat() integration --------------------------------------------------
+# -- client.chat.create() integration --------------------------------------------------
 
 
 def _completion_with(
@@ -331,7 +331,7 @@ def test_chat_accepts_kimi_tool_instance_in_tools_list() -> None:
         return httpx.Response(200, json=_completion_with(content="hello"))
 
     with make_sync_client(handler) as client:
-        client.chat(
+        client.chat.create(
             model=Model.KIMI_K2_0905_PREVIEW,
             messages=[{"role": "user", "content": "?"}],
             tools=[get_weather],

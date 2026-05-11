@@ -3,7 +3,7 @@
 from kimi_agents_python import KimiClient, Model
 
 with KimiClient() as client:
-    stream = client.chat(
+    stream = client.chat.create(
         model=Model.KIMI_K2_0905_PREVIEW,
         messages=[{"role": "user", "content": "Write a haiku about recursion."}],
         stream=True,

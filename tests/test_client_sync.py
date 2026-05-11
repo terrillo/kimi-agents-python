@@ -27,7 +27,7 @@ def test_chat_non_streaming_sends_correct_body() -> None:
         return httpx.Response(200, json=completion_body("hi back"))
 
     with make_sync_client(handler) as client:
-        result = client.chat(
+        result = client.chat.create(
             model=Model.KIMI_K2_0905_PREVIEW,
             messages=[{"role": "user", "content": "ping"}],
             temperature=0.3,
@@ -83,7 +83,7 @@ def test_chat_streaming_yields_chunks() -> None:
 
     with make_sync_client(handler) as client:
         chunks = list(
-            client.chat(
+            client.chat.create(
                 model=Model.KIMI_K2_6,
                 messages=[{"role": "user", "content": "hi"}],
                 stream=True,
@@ -106,7 +106,7 @@ def test_chat_raises_typed_error_on_401() -> None:
 
     with make_sync_client(handler) as client:
         with pytest.raises(KimiAuthenticationError) as exc:
-            client.chat(model="kimi-k2.6", messages=[{"role": "user", "content": "x"}])
+            client.chat.create(model="kimi-k2.6", messages=[{"role": "user", "content": "x"}])
     assert exc.value.status_code == 401
 
 
@@ -120,7 +120,7 @@ def test_chat_streaming_raises_on_error_status() -> None:
     with make_sync_client(handler) as client:
         with pytest.raises(KimiAPIError) as exc:
             list(
-                client.chat(
+                client.chat.create(
                     model="kimi-k2.6",
                     messages=[{"role": "user", "content": "x"}],
                     stream=True,
@@ -143,7 +143,7 @@ def test_list_models() -> None:
         )
 
     with make_sync_client(handler) as client:
-        models = client.list_models()
+        models = client.models.list()
     assert len(models) == 1
     assert models[0].id == "kimi-k2.6"
 
@@ -166,7 +166,7 @@ def test_balance() -> None:
         )
 
     with make_sync_client(handler) as client:
-        b = client.balance()
+        b = client.account.balance()
     assert b.data.available_balance == 10.0
 
 
@@ -178,7 +178,7 @@ def test_estimate_tokens() -> None:
         return httpx.Response(200, json={"data": {"total_tokens": 42}})
 
     with make_sync_client(handler) as client:
-        e = client.estimate_tokens(
+        e = client.tokenizers.estimate(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "hi"}],
         )
@@ -196,7 +196,7 @@ def test_chat_blocks_invalid_param_for_model_before_send() -> None:
 
     with make_sync_client(handler) as client:
         with pytest.raises(ValueError, match="temperature is locked"):
-            client.chat(
+            client.chat.create(
                 model=Model.KIMI_K2_6,
                 messages=[{"role": "user", "content": "x"}],
                 temperature=0.3,
@@ -211,11 +211,62 @@ def test_chat_skips_validation_for_unknown_model() -> None:
         return httpx.Response(200, json=completion_body())
 
     with make_sync_client(handler) as client:
-        client.chat(
+        client.chat.create(
             model="kimi-k2.99-future",
             messages=[{"role": "user", "content": "x"}],
             temperature=0.42,
         )
+
+
+def test_chat_rejects_unknown_kwarg_before_send() -> None:
+    """Typos in chat() kwargs must fail fast, not silently ship to the server."""
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json=completion_body())
+
+    with make_sync_client(handler) as client:
+        with pytest.raises(TypeError, match="temperture"):
+            client.chat.create(
+                model=Model.KIMI_K2_0905_PREVIEW,
+                messages=[{"role": "user", "content": "x"}],
+                temperture=0.3,  # noqa  intentional typo
+            )
+    assert called is False
+
+
+def test_chat_rejects_unknown_kwarg_even_for_unknown_model() -> None:
+    """Unknown-model forward-compat path must still reject typos."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion_body())
+
+    with make_sync_client(handler) as client:
+        with pytest.raises(TypeError, match="foobar"):
+            client.chat.create(
+                model="kimi-k2.99-future",
+                messages=[{"role": "user", "content": "x"}],
+                foobar=1,
+            )
+
+
+def test_chat_accepts_max_tokens_alias() -> None:
+    """`max_tokens` is the pydantic alias for max_completion_tokens — must work."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=completion_body())
+
+    with make_sync_client(handler) as client:
+        client.chat.create(
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=128,
+        )
+    assert captured["body"]["max_tokens"] == 128
 
 
 def test_context_manager_closes_owned_transport() -> None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from ._enums import (
     AVAILABLE_MODELS,
+    BatchEndpoint,
+    BatchStatus,
     FilePurpose,
     FinishReason,
     Model,
@@ -52,16 +54,23 @@ from ._retry import DEFAULT_RETRY, NO_RETRY, RetryConfig
 from ._stats import CacheStats
 from .specs import MODEL_SPECS, ModelSpec, get_model_spec
 from .tools import KimiTool, arun_tools, kimi_tool, run_tools
+from .resources.files import FileContent
 from .types import (
     AssistantMessage,
     BalanceData,
     BalanceInfo,
+    Batch,
+    BatchList,
+    BatchRequestCounts,
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionRequest,
     Choice,
     ChoiceDelta,
     ContentPart,
+    FileDeleted,
+    FileList,
+    FileObject,
     FunctionCall,
     FunctionDef,
     ImageUrl,
@@ -92,6 +101,11 @@ __all__ = [
     "BATCH_FORMATS",
     "BalanceData",
     "BalanceInfo",
+    "Batch",
+    "BatchEndpoint",
+    "BatchList",
+    "BatchRequestCounts",
+    "BatchStatus",
     "CacheStats",
     "ChatCompletion",
     "ChatCompletionChunk",
@@ -104,6 +118,10 @@ __all__ = [
     "EngineOverloadedError",
     "ExceededCurrentQuotaError",
     "FILE_EXTRACT_FORMATS",
+    "FileContent",
+    "FileDeleted",
+    "FileList",
+    "FileObject",
     "FilePurpose",
     "FinishReason",
     "FunctionCall",

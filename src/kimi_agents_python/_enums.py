@@ -66,3 +66,18 @@ class ThinkingSupport(StrEnum):
     NONE = "none"
     CONFIGURABLE = "configurable"
     ALWAYS_ON = "always_on"
+
+
+class BatchStatus(StrEnum):
+    VALIDATING = "validating"
+    FAILED = "failed"
+    IN_PROGRESS = "in_progress"
+    FINALIZING = "finalizing"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
+
+
+class BatchEndpoint(StrEnum):
+    CHAT_COMPLETIONS = "/v1/chat/completions"

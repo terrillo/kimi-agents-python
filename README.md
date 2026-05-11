@@ -1,6 +1,6 @@
 # kimi-agents-python
 
-A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients, streaming, model-aware parameter validation, typed exceptions, auto-retry for transient failures, prompt-cache observability, and file-format checks — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string.
+A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string.
 
 ## Install
 
@@ -28,7 +28,7 @@ MOONSHOT_API_KEY=sk-your-key-here
 from kimi_agents_python import KimiClient, Model
 
 with KimiClient() as client:
-    response = client.chat(
+    response = client.chat.create(
         model=Model.KIMI_K2_6,
         messages=[
             {"role": "system", "content": "You are a helpful coding assistant."},
@@ -42,7 +42,7 @@ with KimiClient() as client:
 
 ```python
 with KimiClient() as client:
-    for chunk in client.chat(
+    for chunk in client.chat.create(
         model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "Write a haiku."}],
         stream=True,
@@ -60,7 +60,7 @@ from kimi_agents_python import AsyncKimiClient, Model
 
 async def main() -> None:
     async with AsyncKimiClient() as client:
-        response = await client.chat(
+        response = await client.chat.create(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "Hello"}],
         )
@@ -89,7 +89,7 @@ for m in AVAILABLE_MODELS:
 Plain strings are accepted too — useful when Kimi ships a new model before this library's enum is updated:
 
 ```python
-client.chat(model="kimi-k2.7-preview", messages=[...])
+client.chat.create(model="kimi-k2.7-preview", messages=[...])
 ```
 
 ## Model specs and parameter validation
@@ -105,7 +105,7 @@ print(spec.thinking_support)   # ThinkingSupport.CONFIGURABLE
 print(spec.supports_video)     # True
 
 with KimiClient() as client:
-    client.chat(
+    client.chat.create(
         model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "hi"}],
         temperature=0.3,   # raises ValueError — k2.6 locks temperature at 1.0
@@ -126,7 +126,7 @@ Unknown model strings bypass validation so the client stays usable when the serv
 Thinking models return a `reasoning_content` field alongside `content`. For `kimi-k2.6` you can also toggle the behaviour via the `thinking` parameter:
 
 ```python
-response = client.chat(
+response = client.chat.create(
     model=Model.KIMI_K2_6,
     messages=[{"role": "user", "content": "Solve: 23 * 47"}],
     thinking={"type": "enabled", "keep": "all"},
@@ -157,7 +157,7 @@ tools = [
     }
 ]
 
-response = client.chat(
+response = client.chat.create(
     model=Model.KIMI_K2_0905_PREVIEW,
     messages=[{"role": "user", "content": "Weather in Tokyo?"}],
     tools=tools,
@@ -229,7 +229,7 @@ schema = {
     "required": ["title", "summary", "tags"],
 }
 
-response = client.chat(
+response = client.chat.create(
     model=Model.KIMI_K2_0905_PREVIEW,
     messages=[{"role": "user", "content": "Summarize garbage collection."}],
     response_format={
@@ -247,7 +247,7 @@ Prefill the assistant message to constrain the response shape. The API returns o
 
 ```python
 PREFILL = "{"
-response = client.chat(
+response = client.chat.create(
     model=Model.KIMI_K2_0905_PREVIEW,
     messages=[
         {"role": "user", "content": "List three Python web frameworks as JSON."},
@@ -262,7 +262,7 @@ body = PREFILL + response.choices[0].message.content
 Multimodal models accept `image_url` and `video_url` content parts (base64 or `ms://<file_id>` references):
 
 ```python
-response = client.chat(
+response = client.chat.create(
     model=Model.KIMI_K2_6,
     messages=[
         {
@@ -303,12 +303,50 @@ validate_file("clip.mp4", FilePurpose.IMAGE)    # raises ValueError
 
 Constants: `MAX_FILE_BYTES = 100 MiB`, `MAX_TOTAL_BYTES = 10 GiB`, `MAX_FILES = 1000`.
 
+## Files
+
+```python
+from pathlib import Path
+from kimi_agents_python import FilePurpose, KimiClient
+
+with KimiClient() as client:
+    f = client.files.create(file=Path("report.pdf"), purpose=FilePurpose.FILE_EXTRACT)
+    text = client.files.content(f.id).text   # extracted text
+
+    client.files.list()                       # list[FileObject]
+    client.files.retrieve(f.id)               # FileObject
+    client.files.delete(f.id)                 # FileDeleted
+```
+
+`client.files.create(file=...)` accepts a path (`str` / `Path`) or a `(filename, bytes)` tuple for in-memory uploads. Path uploads with a known `FilePurpose` are checked against `validate_file()` before the HTTP call.
+
+## Batches
+
+```python
+from kimi_agents_python import BatchEndpoint, FilePurpose, KimiClient
+
+with KimiClient() as client:
+    input_file = client.files.create(file="batch_input.jsonl", purpose=FilePurpose.BATCH)
+    batch = client.batches.create(
+        input_file_id=input_file.id,
+        endpoint=BatchEndpoint.CHAT_COMPLETIONS,
+        completion_window="24h",       # min "12h", max "7d"
+        metadata={"job": "nightly"},
+    )
+
+    batch = client.batches.retrieve(batch.id)
+    client.batches.list(after="cursor", limit=20)
+    client.batches.cancel(batch.id)
+```
+
+`batch.status` is a `BatchStatus` (`validating` → `in_progress` → `finalizing` → `completed` | `failed` | `expired` | `cancelled`). When complete, `batch.output_file_id` points at a JSONL result file you fetch with `client.files.content(...)`.
+
 ## Helper endpoints
 
 ```python
-client.list_models()                                            # GET /models
-client.estimate_tokens(model=Model.KIMI_K2_6, messages=[...])   # POST /tokenizers/estimate-token-count
-client.balance()                                                # GET /users/me/balance
+client.models.list()                                                # GET /models
+client.tokenizers.estimate(model=Model.KIMI_K2_6, messages=[...])   # POST /tokenizers/estimate-token-count
+client.account.balance()                                            # GET /users/me/balance
 ```
 
 ## Errors
@@ -334,7 +372,7 @@ from kimi_agents_python import (
 )
 
 try:
-    client.chat(model=Model.KIMI_K2_6, messages=[...])
+    client.chat.create(model=Model.KIMI_K2_6, messages=[...])
 except InvalidAuthenticationError as e:
     print(f"Bad key: {e.message}")
 except RateLimitReachedError:
@@ -374,7 +412,7 @@ from kimi_agents_python import KimiClient, Model
 
 with KimiClient(prompt_cache_key="user-42-session-7") as client:
     for question in (...):
-        client.chat(model=Model.KIMI_K2_6, messages=[
+        client.chat.create(model=Model.KIMI_K2_6, messages=[
             {"role": "system", "content": SHARED_SYSTEM_PROMPT},
             {"role": "user", "content": question},
         ])
@@ -391,7 +429,7 @@ with KimiClient(prompt_cache_key="user-42-session-7") as client:
 
 ## Examples
 
-The [`examples/`](examples/) directory has 15 self-contained scripts, each under 60 lines:
+The [`examples/`](examples/) directory has 17 self-contained scripts, each under 60 lines:
 
 ```bash
 uv run python examples/01_basic_chat.py
@@ -407,19 +445,21 @@ uv run python examples/01_basic_chat.py
 | `06_vision.py` | Base64 image input |
 | `07_json_schema.py` | Structured output |
 | `08_partial_mode.py` | Assistant prefill |
-| `09_helpers.py` | `list_models` / `estimate_tokens` / `balance` |
+| `09_helpers.py` | `models.list` / `tokenizers.estimate` / `account.balance` |
 | `10_file_validation.py` | Pre-upload checks (no API call) |
 | `11_error_handling.py` | Typed errors + client-side validation |
 | `12_kimi_tool_decorator.py` | `@kimi_tool` + `run_tools` auto-loop |
 | `13_auto_retry.py` | `RetryConfig` for transient failures |
 | `14_prompt_caching.py` | `prompt_cache_key` + `cache_stats` |
 | `15_thinking_tools.py` | `kimi-k2-thinking` multi-step tool calls |
+| `16_files.py` | `client.files` upload / extract / delete |
+| `17_batches.py` | `client.batches` submit, poll, fetch results |
 
 ## Development
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 178 tests, <1s
+uv run pytest                      # 196 tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 

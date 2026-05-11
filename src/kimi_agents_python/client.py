@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterable, Iterator
-from contextlib import AsyncExitStack, ExitStack
 from types import TracebackType
-from typing import Any, ClassVar, Literal, overload
+from typing import Any, ClassVar
 
 import httpx
 
@@ -12,27 +10,25 @@ from ._http import (
     DEFAULT_BASE_URL,
     DEFAULT_TIMEOUT,
     bearer_headers,
-    parse_sse_line,
     raise_for_status,
     resolve_api_key,
 )
 from ._retry import DEFAULT_RETRY, RetryConfig, retry_async, retry_sync
 from ._stats import CacheStats
-from .specs import get_model_spec
-from .tools import KimiTool
-from .types import (
-    BalanceInfo,
-    ChatCompletion,
-    ChatCompletionChunk,
-    ChatCompletionRequest,
-    Message,
-    ModelInfo,
-    ModelList,
-    TokenEstimate,
-    Usage,
+from .resources import (
+    Account,
+    AsyncAccount,
+    AsyncBatches,
+    AsyncChat,
+    AsyncFiles,
+    AsyncModels,
+    AsyncTokenizers,
+    Batches,
+    Chat,
+    Files,
+    Models,
+    Tokenizers,
 )
-
-_MessageInput = Message | dict[str, Any]
 
 
 def _resolve_retry(retries: int | RetryConfig | None) -> RetryConfig:
@@ -43,40 +39,18 @@ def _resolve_retry(retries: int | RetryConfig | None) -> RetryConfig:
     return RetryConfig(max_retries=retries)
 
 
-def _build_request_body(
-    *,
-    model: Model | str,
-    messages: Iterable[_MessageInput],
-    stream: bool,
-    extra: dict[str, Any],
-    default_cache_key: str | None = None,
-) -> dict[str, Any]:
-    spec = get_model_spec(model)
-    if spec is not None:
-        spec.validate_params(extra)
-    if default_cache_key is not None and "prompt_cache_key" not in extra:
-        extra = {**extra, "prompt_cache_key": default_cache_key}
-    if extra.get("tools"):
-        extra = {
-            **extra,
-            "tools": [
-                t.to_tool_def() if isinstance(t, KimiTool) else t
-                for t in extra["tools"]
-            ],
-        }
-    payload: dict[str, Any] = {
-        "model": str(model),
-        "messages": list(messages),
-        **extra,
-    }
-    if stream:
-        payload["stream"] = True
-    req = ChatCompletionRequest.model_validate(payload)
-    return req.model_dump(exclude_none=True, by_alias=True, mode="json")
-
-
 class KimiClient:
-    """Synchronous Kimi (Moonshot) chat client."""
+    """Synchronous Kimi (Moonshot) API client.
+
+    Resources are exposed as namespaces:
+
+    * ``client.chat.create(...)`` — chat completions
+    * ``client.files.create/list/retrieve/delete/content`` — file management
+    * ``client.batches.create/retrieve/list/cancel`` — batch inference
+    * ``client.models.list()`` — available models
+    * ``client.tokenizers.estimate(...)`` — token-count estimate
+    * ``client.account.balance()`` — billing balance
+    """
 
     AVAILABLE_MODELS: ClassVar[tuple[Model, ...]] = AVAILABLE_MODELS
     Model: ClassVar[type[Model]] = Model
@@ -103,9 +77,22 @@ class KimiClient:
         self._prompt_cache_key = prompt_cache_key
         self.cache_stats = CacheStats()
 
-    def _record_usage(self, usage: Usage | None) -> None:
-        if usage is not None:
-            self.cache_stats.record(usage)
+        self.chat = Chat(self)
+        self.files = Files(self)
+        self.batches = Batches(self)
+        self.models = Models(self)
+        self.tokenizers = Tokenizers(self)
+        self.account = Account(self)
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        def _do() -> httpx.Response:
+            response = self._http.request(
+                method, path, headers=self._auth, **kwargs
+            )
+            raise_for_status(response)
+            return response
+
+        return retry_sync(self._retry, _do)
 
     def close(self) -> None:
         if self._owns_client:
@@ -122,105 +109,12 @@ class KimiClient:
     ) -> None:
         self.close()
 
-    @overload
-    def chat(
-        self,
-        *,
-        model: Model | str,
-        messages: Iterable[_MessageInput],
-        stream: Literal[False] = False,
-        **params: Any,
-    ) -> ChatCompletion: ...
-
-    @overload
-    def chat(
-        self,
-        *,
-        model: Model | str,
-        messages: Iterable[_MessageInput],
-        stream: Literal[True],
-        **params: Any,
-    ) -> Iterator[ChatCompletionChunk]: ...
-
-    def chat(
-        self,
-        *,
-        model: Model | str,
-        messages: Iterable[_MessageInput],
-        stream: bool = False,
-        **params: Any,
-    ) -> ChatCompletion | Iterator[ChatCompletionChunk]:
-        body = _build_request_body(
-            model=model,
-            messages=messages,
-            stream=stream,
-            extra=params,
-            default_cache_key=self._prompt_cache_key,
-        )
-        if stream:
-            return self._stream_chat(body)
-        response = self._request("POST", "/chat/completions", json=body)
-        completion = ChatCompletion.model_validate(response.json())
-        self._record_usage(completion.usage)
-        return completion
-
-    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        def _do() -> httpx.Response:
-            response = self._http.request(
-                method, path, headers=self._auth, **kwargs
-            )
-            raise_for_status(response)
-            return response
-
-        return retry_sync(self._retry, _do)
-
-    def _stream_chat(self, body: dict[str, Any]) -> Iterator[ChatCompletionChunk]:
-        def _open() -> tuple[ExitStack, httpx.Response]:
-            stack = ExitStack()
-            try:
-                response = stack.enter_context(
-                    self._http.stream(
-                        "POST", "/chat/completions", json=body, headers=self._auth
-                    )
-                )
-                if response.status_code >= 400:
-                    response.read()
-                    raise_for_status(response)
-            except BaseException:
-                stack.close()
-                raise
-            return stack, response
-
-        stack, response = retry_sync(self._retry, _open)
-        with stack:
-            for line in response.iter_lines():
-                chunk = parse_sse_line(line)
-                if chunk is None:
-                    continue
-                parsed = ChatCompletionChunk.model_validate(chunk)
-                self._record_usage(parsed.usage)
-                yield parsed
-
-    def list_models(self) -> list[ModelInfo]:
-        response = self._request("GET", "/models")
-        return ModelList.model_validate(response.json()).data
-
-    def estimate_tokens(
-        self, *, model: Model | str, messages: Iterable[_MessageInput]
-    ) -> TokenEstimate:
-        body = {"model": str(model), "messages": list(messages)}
-        response = self._request(
-            "POST", "/tokenizers/estimate-token-count", json=body
-        )
-        return TokenEstimate.model_validate(response.json())
-
-    def balance(self) -> BalanceInfo:
-        response = self._request("GET", "/users/me/balance")
-        return BalanceInfo.model_validate(response.json())
-
 
 class AsyncKimiClient:
-    """Asynchronous Kimi (Moonshot) chat client."""
+    """Asynchronous Kimi (Moonshot) API client.
+
+    Mirrors :class:`KimiClient`; each resource method is a coroutine.
+    """
 
     AVAILABLE_MODELS: ClassVar[tuple[Model, ...]] = AVAILABLE_MODELS
     Model: ClassVar[type[Model]] = Model
@@ -247,9 +141,24 @@ class AsyncKimiClient:
         self._prompt_cache_key = prompt_cache_key
         self.cache_stats = CacheStats()
 
-    def _record_usage(self, usage: Usage | None) -> None:
-        if usage is not None:
-            self.cache_stats.record(usage)
+        self.chat = AsyncChat(self)
+        self.files = AsyncFiles(self)
+        self.batches = AsyncBatches(self)
+        self.models = AsyncModels(self)
+        self.tokenizers = AsyncTokenizers(self)
+        self.account = AsyncAccount(self)
+
+    async def _request(
+        self, method: str, path: str, **kwargs: Any
+    ) -> httpx.Response:
+        async def _do() -> httpx.Response:
+            response = await self._http.request(
+                method, path, headers=self._auth, **kwargs
+            )
+            raise_for_status(response)
+            return response
+
+        return await retry_async(self._retry, _do)
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -266,102 +175,5 @@ class AsyncKimiClient:
     ) -> None:
         await self.aclose()
 
-    @overload
-    async def chat(
-        self,
-        *,
-        model: Model | str,
-        messages: Iterable[_MessageInput],
-        stream: Literal[False] = False,
-        **params: Any,
-    ) -> ChatCompletion: ...
 
-    @overload
-    async def chat(
-        self,
-        *,
-        model: Model | str,
-        messages: Iterable[_MessageInput],
-        stream: Literal[True],
-        **params: Any,
-    ) -> AsyncIterator[ChatCompletionChunk]: ...
-
-    async def chat(
-        self,
-        *,
-        model: Model | str,
-        messages: Iterable[_MessageInput],
-        stream: bool = False,
-        **params: Any,
-    ) -> ChatCompletion | AsyncIterator[ChatCompletionChunk]:
-        body = _build_request_body(
-            model=model,
-            messages=messages,
-            stream=stream,
-            extra=params,
-            default_cache_key=self._prompt_cache_key,
-        )
-        if stream:
-            return self._stream_chat(body)
-        response = await self._request("POST", "/chat/completions", json=body)
-        completion = ChatCompletion.model_validate(response.json())
-        self._record_usage(completion.usage)
-        return completion
-
-    async def _request(
-        self, method: str, path: str, **kwargs: Any
-    ) -> httpx.Response:
-        async def _do() -> httpx.Response:
-            response = await self._http.request(
-                method, path, headers=self._auth, **kwargs
-            )
-            raise_for_status(response)
-            return response
-
-        return await retry_async(self._retry, _do)
-
-    async def _stream_chat(
-        self, body: dict[str, Any]
-    ) -> AsyncIterator[ChatCompletionChunk]:
-        async def _open() -> tuple[AsyncExitStack, httpx.Response]:
-            stack = AsyncExitStack()
-            try:
-                response = await stack.enter_async_context(
-                    self._http.stream(
-                        "POST", "/chat/completions", json=body, headers=self._auth
-                    )
-                )
-                if response.status_code >= 400:
-                    await response.aread()
-                    raise_for_status(response)
-            except BaseException:
-                await stack.aclose()
-                raise
-            return stack, response
-
-        stack, response = await retry_async(self._retry, _open)
-        async with stack:
-            async for line in response.aiter_lines():
-                chunk = parse_sse_line(line)
-                if chunk is None:
-                    continue
-                parsed = ChatCompletionChunk.model_validate(chunk)
-                self._record_usage(parsed.usage)
-                yield parsed
-
-    async def list_models(self) -> list[ModelInfo]:
-        response = await self._request("GET", "/models")
-        return ModelList.model_validate(response.json()).data
-
-    async def estimate_tokens(
-        self, *, model: Model | str, messages: Iterable[_MessageInput]
-    ) -> TokenEstimate:
-        body = {"model": str(model), "messages": list(messages)}
-        response = await self._request(
-            "POST", "/tokenizers/estimate-token-count", json=body
-        )
-        return TokenEstimate.model_validate(response.json())
-
-    async def balance(self) -> BalanceInfo:
-        response = await self._request("GET", "/users/me/balance")
-        return BalanceInfo.model_validate(response.json())
+__all__ = ["AsyncKimiClient", "KimiClient"]

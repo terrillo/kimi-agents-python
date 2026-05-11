@@ -17,7 +17,7 @@ def encode_image(path: Path) -> str:
 def main(image_path: str) -> None:
     url = encode_image(Path(image_path))
     with KimiClient() as client:
-        response = client.chat(
+        response = client.chat.create(
             model=Model.KIMI_K2_6,
             messages=[
                 {

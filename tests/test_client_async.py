@@ -22,7 +22,7 @@ async def test_async_chat_non_streaming() -> None:
         return httpx.Response(200, json=completion_body())
 
     async with make_async_client(handler) as client:
-        result = await client.chat(
+        result = await client.chat.create(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
         )
@@ -55,7 +55,7 @@ async def test_async_chat_streaming() -> None:
         )
 
     async with make_async_client(handler) as client:
-        stream = await client.chat(
+        stream = await client.chat.create(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "x"}],
             stream=True,
@@ -78,7 +78,7 @@ async def test_async_chat_auth_error() -> None:
 
     async with make_async_client(handler) as client:
         with pytest.raises(KimiAuthenticationError):
-            await client.chat(
+            await client.chat.create(
                 model=Model.KIMI_K2_6,
                 messages=[{"role": "user", "content": "x"}],
             )
@@ -93,7 +93,7 @@ async def test_async_chat_streaming_raises_on_error_status() -> None:
 
     async with make_async_client(handler) as client:
         with pytest.raises(KimiAPIError) as exc:
-            stream = await client.chat(
+            stream = await client.chat.create(
                 model=Model.KIMI_K2_6,
                 messages=[{"role": "user", "content": "x"}],
                 stream=True,
@@ -111,7 +111,7 @@ async def test_async_list_models() -> None:
         )
 
     async with make_async_client(handler) as client:
-        models = await client.list_models()
+        models = await client.models.list()
     assert models[0].id == "kimi-k2.6"
 
 
@@ -131,7 +131,7 @@ async def test_async_balance() -> None:
         )
 
     async with make_async_client(handler) as client:
-        b = await client.balance()
+        b = await client.account.balance()
     assert b.data.available_balance == 7.5
 
 
@@ -143,7 +143,7 @@ async def test_async_estimate_tokens() -> None:
         return httpx.Response(200, json={"data": {"total_tokens": 17}})
 
     async with make_async_client(handler) as client:
-        e = await client.estimate_tokens(
+        e = await client.tokenizers.estimate(
             model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "hi"}],
         )

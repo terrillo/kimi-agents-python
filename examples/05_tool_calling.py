@@ -28,7 +28,7 @@ TOOLS = [
 messages: list[dict] = [{"role": "user", "content": "What's the weather in Tokyo?"}]
 
 with KimiClient() as client:
-    first = client.chat(model=Model.KIMI_K2_0905_PREVIEW, messages=messages, tools=TOOLS)
+    first = client.chat.create(model=Model.KIMI_K2_0905_PREVIEW, messages=messages, tools=TOOLS)
     assistant = first.choices[0].message
 
     if not assistant.tool_calls:
@@ -51,7 +51,7 @@ with KimiClient() as client:
                     "content": json.dumps(result),
                 }
             )
-        final = client.chat(
+        final = client.chat.create(
             model=Model.KIMI_K2_0905_PREVIEW, messages=messages, tools=TOOLS
         )
         print(final.choices[0].message.content)

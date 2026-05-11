@@ -3,7 +3,7 @@
 from kimi_agents_python import KimiClient, Model
 
 with KimiClient() as client:
-    response = client.chat(
+    response = client.chat.create(
         model=Model.KIMI_K2_0905_PREVIEW,
         messages=[
             {"role": "system", "content": "You are a concise coding assistant."},

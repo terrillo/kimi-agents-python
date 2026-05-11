@@ -16,7 +16,7 @@ with KimiClient(prompt_cache_key="demo-session-1") as client:
         "And for module-level constants?",
         "What about private helpers?",
     ):
-        response = client.chat(
+        response = client.chat.create(
             model=Model.KIMI_K2_6,
             messages=[
                 {"role": "system", "content": SHARED_SYSTEM},
@@ -37,7 +37,7 @@ with KimiClient(prompt_cache_key="demo-session-1") as client:
 # A per-call prompt_cache_key overrides the default — useful when one client
 # instance multiplexes requests for many sessions.
 with KimiClient(prompt_cache_key="default") as client:
-    client.chat(
+    client.chat.create(
         model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "hi"}],
         prompt_cache_key="user-42-session-7",

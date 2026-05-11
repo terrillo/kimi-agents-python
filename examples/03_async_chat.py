@@ -12,7 +12,7 @@ QUESTIONS = [
 
 
 async def ask(client: AsyncKimiClient, q: str) -> str:
-    r = await client.chat(
+    r = await client.chat.create(
         model=Model.KIMI_K2_0905_PREVIEW,
         messages=[{"role": "user", "content": f"{q} Answer in one sentence."}],
         max_tokens=80,
