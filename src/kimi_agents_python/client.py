@@ -89,6 +89,10 @@ class KimiClient:
         self.account = Account(self)
         self.formulas = Formulas(self)
 
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         def _do() -> httpx.Response:
             response = self._http.request(
@@ -179,6 +183,10 @@ class AsyncKimiClient:
         self.tokenizers = AsyncTokenizers(self)
         self.account = AsyncAccount(self)
         self.formulas = AsyncFormulas(self)
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
 
     async def _request(
         self, method: str, path: str, **kwargs: Any
