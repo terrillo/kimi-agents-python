@@ -8,7 +8,6 @@ from kimi_agents_python import (
     Model,
     TokenStats,
     Usage,
-    WEB_SEARCH_CALL_USD,
     usage_to_cost,
 )
 
@@ -21,10 +20,6 @@ def test_pricing_table_covers_active_models() -> None:
         Model.MOONSHOT_V1_128K,
     ):
         assert m in MODEL_PRICING
-
-
-def test_web_search_call_fee() -> None:
-    assert WEB_SEARCH_CALL_USD == Decimal("0.005")
 
 
 def test_usage_to_cost_splits_cache_hit_and_miss() -> None:

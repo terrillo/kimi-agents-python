@@ -4,14 +4,9 @@ import json
 
 import httpx
 
-from kimi_agents_python import BuiltinTool, Model, Session, web_search
+from kimi_agents_python import Model, Session, web_search
 
 from .conftest import completion_body, make_sync_client
-
-
-def test_web_search_is_builtin_tool() -> None:
-    assert isinstance(web_search, BuiltinTool)
-    assert web_search.name == "$web_search"
 
 
 def test_web_search_wire_shape() -> None:

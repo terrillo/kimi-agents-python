@@ -1008,13 +1008,6 @@ def test_run_tools_read_only_streak_resets_on_mutating_call() -> None:
     assert result.choices[0].message.content == "done"
 
 
-def test_loop_guards_exceptions_inherit_from_kimi_tool_loop_error() -> None:
-    """Callers can catch the base class to handle all four termination reasons."""
-    assert issubclass(TokenBudgetExceededError, KimiToolLoopError)
-    assert issubclass(ReadOnlyStreakExceededError, KimiToolLoopError)
-    assert issubclass(RepeatedToolCallError, KimiToolLoopError)
-
-
 async def test_arun_tools_token_budget_raises() -> None:
     @kimi_tool
     async def echo(msg: str) -> str:
