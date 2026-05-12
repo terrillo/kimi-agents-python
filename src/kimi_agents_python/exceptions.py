@@ -29,6 +29,21 @@ class RepeatedToolCallError(KimiToolLoopError):
     """Same (tool name, arguments) appeared N times in a row — likely a stuck loop."""
 
 
+class ManualMultiTurnError(ValueError):
+    """``client.chat.create()`` was called with a multi-turn ``messages`` list.
+
+    Direct ``chat.create()`` is single-turn only: ``[system?, user]`` or, for
+    prefill mode, ``[system?, user, assistant(partial=True)]``. Anything with
+    a prior ``assistant`` or ``tool`` message is multi-turn — use
+    :class:`~kimi_agents_python.session.Session` (or
+    :func:`~kimi_agents_python.run_tools`) so ``reasoning_content`` and tool
+    transcripts are echoed correctly.
+
+    Inherits ``ValueError`` so existing ``except ValueError`` blocks still
+    match.
+    """
+
+
 class ThinkingIncompatibilityError(ValueError):
     """A chat() parameter is incompatible with thinking mode on this model.
 

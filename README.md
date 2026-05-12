@@ -139,32 +139,47 @@ print("answer:", msg.content)
 
 `keep="all"` preserves prior reasoning across multi-turn conversations (k2.6 only).
 
-### Multi-turn footgun: echo `reasoning_content` back
+## Multi-turn: `Session`
 
-When a thinking model returns `reasoning_content`, you **must** copy that field into the assistant message you send back on the next turn. Drop it and Moonshot returns an opaque HTTP 400 — the SDK won't catch this for you. Applies to:
+`chat.create()` is single-turn only. Pass it `[system?, user]` or, for prefill, `[system?, user, assistant(partial=True)]` — anything else (a prior `assistant` message, a `tool` result) raises `ManualMultiTurnError` *before* the HTTP call. This is deliberate: thinking models require `reasoning_content` to be echoed back on every turn, and the library refuses to send a payload that would silently 400.
 
-- `kimi-k2.6` with `thinking={"type": "enabled", "keep": "all"}`
-- `kimi-k2-thinking` and `kimi-k2-thinking-turbo` (always-on thinking)
+Use `Session` for any multi-turn conversation. It owns the message list, copies `reasoning_content` automatically, tracks per-conversation cache and token stats, runs tool loops, and supports `fork()` / `checkpoint()` for branching and rollback.
 
 ```python
-response = client.chat.create(model=Model.KIMI_K2_6, messages=messages,
-                              thinking={"type": "enabled", "keep": "all"},
-                              max_tokens=16000)
-msg = response.choices[0].message
+from kimi_agents_python import KimiClient, Model, Session
 
-messages.append({
-    "role": "assistant",
-    "content": msg.content,
-    "reasoning_content": msg.reasoning_content,  # required — do not drop
-})
-messages.append({"role": "user", "content": "follow-up question"})
+with KimiClient() as client:
+    sess = Session(
+        client,
+        model=Model.KIMI_K2_6,
+        system="You are a research assistant.",
+        thinking={"type": "enabled", "keep": "all"},
+        prompt_cache_key="user-42-task-7",
+    )
+    sess.send("Find Q3 revenue for the top 3 cloud vendors.")
+    sess.send("Now sort by revenue descending.")   # context preserved automatically
 
-response = client.chat.create(model=Model.KIMI_K2_6, messages=messages,
-                              thinking={"type": "enabled", "keep": "all"},
-                              max_tokens=16000)
+    print(sess.history)         # list[Message]
+    print(sess.usage)           # TokenStats — prompt / completion / total / cached
+    print(sess.cache_stats)     # CacheStats — per-session, separate from client.cache_stats
 ```
 
-`run_tools` / `arun_tools` handle this automatically — the footgun only bites callers who build the message history by hand.
+Streaming, tool loops, branching:
+
+```python
+for chunk in sess.stream("Explain the methodology."):
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
+
+sess.send("What's the weather?", tools=[get_weather])   # runs the tool loop
+
+cid = sess.checkpoint()                                 # snapshot
+sess.send("explore a risky direction")
+sess.restore(cid)                                       # rollback
+
+branch = sess.fork()                                    # tree-of-thought
+```
+
+`AsyncSession` mirrors the surface against `AsyncKimiClient`. `run_tools` / `arun_tools` are the lower-level alternatives for one-shot tool loops.
 
 ## Tool calling
 
@@ -193,7 +208,7 @@ for call in response.choices[0].message.tool_calls or []:
     print(call.function.name, call.function.arguments)
 ```
 
-See [`examples/05_tool_calling.py`](examples/05_tool_calling.py) for the full multi-turn loop that feeds tool results back to the model.
+See [`examples/05_tool_calling.py`](examples/05_tool_calling.py) for the full tool-result follow-up flow driven through `Session`.
 
 ### `@kimi_tool` + auto-loop
 
@@ -457,9 +472,24 @@ except RateLimitReachedError:
     ...
 ```
 
-Client-side spec violations raise `ValueError` *before* any HTTP call.
+Client-side spec violations raise `ValueError` *before* any HTTP call. Two subclasses are worth catching specifically:
 
-One subclass worth catching specifically: **`ThinkingIncompatibilityError`** (a `ValueError`) fires when a parameter clashes with thinking mode — currently `tool_choice="required"` while thinking is enabled. Moonshot otherwise responds with a generic 400 that takes a while to decode; this check surfaces the exact cause before the request leaves your machine.
+**`ManualMultiTurnError`** fires when `chat.create()` is handed a payload with a prior `assistant` or `tool` message — the multi-turn path is closed at the boundary so thinking-model conversations can't silently 400 by dropping `reasoning_content`. The fix is always the same: switch to `Session`.
+
+```python
+from kimi_agents_python import ManualMultiTurnError
+
+try:
+    client.chat.create(model=Model.KIMI_K2_6, messages=[
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "again"},
+    ])
+except ManualMultiTurnError:
+    ...   # use Session instead — see the Multi-turn section above
+```
+
+**`ThinkingIncompatibilityError`** fires when a parameter clashes with thinking mode — currently `tool_choice="required"` while thinking is enabled. Moonshot otherwise responds with a generic 400 that takes a while to decode; this check surfaces the exact cause before the request leaves your machine.
 
 ```python
 from kimi_agents_python import ThinkingIncompatibilityError
@@ -543,7 +573,7 @@ log.info("kimi turn: cached=%d / %d (%.1f%%)",
 
 ## Examples
 
-The [`examples/`](examples/) directory has 17 self-contained scripts, each under 60 lines:
+The [`examples/`](examples/) directory has 19 self-contained scripts, each under 60 lines:
 
 ```bash
 uv run python examples/01_basic_chat.py
@@ -555,7 +585,7 @@ uv run python examples/01_basic_chat.py
 | `02_streaming.py` | Token-by-token streaming |
 | `03_async_chat.py` | `AsyncKimiClient` + `asyncio.gather` |
 | `04_thinking.py` | `reasoning_content` from k2.6 |
-| `05_tool_calling.py` | Full tool-result follow-up turn |
+| `05_tool_calling.py` | Tool-result follow-up turn driven via `Session` |
 | `06_vision.py` | Base64 image input |
 | `07_json_schema.py` | Structured output |
 | `08_partial_mode.py` | Assistant prefill |
@@ -568,12 +598,14 @@ uv run python examples/01_basic_chat.py
 | `15_thinking_tools.py` | `kimi-k2-thinking` multi-step tool calls |
 | `16_files.py` | `client.files` upload / extract / delete |
 | `17_batches.py` | `client.batches` submit, poll, fetch results |
+| `18_session_basic.py` | `Session` multi-turn chat + per-session usage |
+| `19_session_fork_checkpoint.py` | `Session.fork()` branches + `checkpoint()` / `restore()` rollback |
 
 ## Development
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 200 tests, <1s
+uv run pytest                      # 220+ tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 

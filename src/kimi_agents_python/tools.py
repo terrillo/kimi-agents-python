@@ -353,6 +353,50 @@ class _LoopState:
             self.read_only_streak = 0
 
 
+def _run_tools_inner(
+    client: KimiClient,
+    *,
+    model: Model | str,
+    messages: Sequence[dict | Message],
+    tools: Sequence[KimiTool],
+    max_steps: int,
+    guards: LoopGuards | None,
+    **chat_kwargs: Any,
+) -> tuple[ChatCompletion, list[dict]]:
+    """Drive the sync tool loop and return both the terminal response and
+    the full assembled transcript (user + assistant + tool messages, all
+    dict-shaped per the API payload form).
+
+    The terminal assistant message is appended to the transcript before
+    returning, so callers like :class:`~kimi_agents_python.session.Session`
+    can persist the complete conversation. ``reasoning_content`` is preserved
+    on every assistant turn via :func:`_assistant_record`.
+    """
+    registry = {t.name: t for t in tools}
+    convo = _serialise_messages(messages)
+    state = _LoopState(guards or LoopGuards())
+    for _ in range(max_steps):
+        response = client.chat._create(
+            model=model, messages=convo, tools=list(tools), **chat_kwargs
+        )
+        state.record_tokens(response.usage)
+        msg = response.choices[0].message
+        if not msg.tool_calls:
+            convo.append(_assistant_record(msg))
+            return response, convo
+        convo.append(_assistant_record(msg))
+        for tc in msg.tool_calls:
+            tool = registry.get(tc.function.name)
+            state.record_call(tool, tc)
+            content = (
+                tool.invoke(tc.function.arguments)
+                if tool is not None
+                else f"Unknown tool: {tc.function.name}"
+            )
+            convo.append(_tool_result_record(tc, content))
+    raise KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")
+
+
 def run_tools(
     client: KimiClient,
     *,
@@ -371,64 +415,44 @@ def run_tools(
     ``can_parallel`` is recorded on each tool but has no effect in the sync
     helper — call dispatch is always sequential.
     """
-    registry = {t.name: t for t in tools}
-    convo = _serialise_messages(messages)
-    state = _LoopState(guards or LoopGuards())
-    for _ in range(max_steps):
-        response = client.chat.create(
-            model=model, messages=convo, tools=list(tools), **chat_kwargs
-        )
-        state.record_tokens(response.usage)
-        msg = response.choices[0].message
-        if not msg.tool_calls:
-            return response
-        convo.append(_assistant_record(msg))
-        for tc in msg.tool_calls:
-            tool = registry.get(tc.function.name)
-            state.record_call(tool, tc)
-            content = (
-                tool.invoke(tc.function.arguments)
-                if tool is not None
-                else f"Unknown tool: {tc.function.name}"
-            )
-            convo.append(_tool_result_record(tc, content))
-    raise KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")
+    response, _ = _run_tools_inner(
+        client,
+        model=model,
+        messages=messages,
+        tools=tools,
+        max_steps=max_steps,
+        guards=guards,
+        **chat_kwargs,
+    )
+    return response
 
 
-async def arun_tools(
+async def _arun_tools_inner(
     client: AsyncKimiClient,
     *,
     model: Model | str,
     messages: Sequence[dict | Message],
     tools: Sequence[KimiTool],
-    max_steps: int = 5,
-    guards: LoopGuards | None = None,
+    max_steps: int,
+    guards: LoopGuards | None,
     **chat_kwargs: Any,
-) -> ChatCompletion:
-    """Async equivalent of :func:`run_tools` with partitioned parallel dispatch.
-
-    Each turn's ``tool_calls`` are split into two buckets: every call whose
-    resolved tool has ``can_parallel=True`` is dispatched concurrently in a
-    single :func:`asyncio.gather`, then any remaining calls (``can_parallel=False``
-    tools and unknown tool names) run sequentially. Results are appended to the
-    transcript in the model's original ``tool_calls`` order regardless of
-    dispatch order, so subsequent turns see a deterministic conversation.
-
-    :class:`LoopGuards` checks are evaluated in the model's original call
-    order, before any dispatch — so a guard can short-circuit a parallel
-    batch before it kicks off.
+) -> tuple[ChatCompletion, list[dict]]:
+    """Async counterpart to :func:`_run_tools_inner`. Same contract: returns
+    ``(terminal_response, full_transcript)`` with the terminal assistant
+    message included in the transcript.
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     state = _LoopState(guards or LoopGuards())
     for _ in range(max_steps):
-        response = await client.chat.create(
+        response = await client.chat._create(
             model=model, messages=convo, tools=list(tools), **chat_kwargs
         )
         state.record_tokens(response.usage)
         msg = response.choices[0].message
         if not msg.tool_calls:
-            return response
+            convo.append(_assistant_record(msg))
+            return response, convo
         convo.append(_assistant_record(msg))
 
         resolved = [(tc, registry.get(tc.function.name)) for tc in msg.tool_calls]
@@ -461,3 +485,38 @@ async def arun_tools(
         for (tc, _), content in zip(resolved, results):
             convo.append(_tool_result_record(tc, content or ""))
     raise KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")
+
+
+async def arun_tools(
+    client: AsyncKimiClient,
+    *,
+    model: Model | str,
+    messages: Sequence[dict | Message],
+    tools: Sequence[KimiTool],
+    max_steps: int = 5,
+    guards: LoopGuards | None = None,
+    **chat_kwargs: Any,
+) -> ChatCompletion:
+    """Async equivalent of :func:`run_tools` with partitioned parallel dispatch.
+
+    Each turn's ``tool_calls`` are split into two buckets: every call whose
+    resolved tool has ``can_parallel=True`` is dispatched concurrently in a
+    single :func:`asyncio.gather`, then any remaining calls (``can_parallel=False``
+    tools and unknown tool names) run sequentially. Results are appended to the
+    transcript in the model's original ``tool_calls`` order regardless of
+    dispatch order, so subsequent turns see a deterministic conversation.
+
+    :class:`LoopGuards` checks are evaluated in the model's original call
+    order, before any dispatch — so a guard can short-circuit a parallel
+    batch before it kicks off.
+    """
+    response, _ = await _arun_tools_inner(
+        client,
+        model=model,
+        messages=messages,
+        tools=tools,
+        max_steps=max_steps,
+        guards=guards,
+        **chat_kwargs,
+    )
+    return response

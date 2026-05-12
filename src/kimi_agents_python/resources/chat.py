@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 import httpx
 
-from .._enums import Model
+from .._enums import Model, Role
 from .._http import parse_sse_line, raise_for_status
 from .._retry import retry_async, retry_sync
+from ..exceptions import ManualMultiTurnError
 from ..specs import get_model_spec
 from ..tools import KimiTool
 from ..types import (
@@ -23,6 +24,48 @@ if TYPE_CHECKING:
 
 
 _MessageInput = Message | dict[str, Any]
+
+
+_SESSION_HINT = (
+    "Use Session for multi-turn flows so reasoning_content and tool "
+    "transcripts are echoed correctly: `from kimi_agents_python import Session`."
+)
+
+
+def _message_role(m: _MessageInput) -> Role | None:
+    raw = m.role if isinstance(m, Message) else m.get("role")
+    if raw is None:
+        return None
+    try:
+        return Role(raw)
+    except ValueError:
+        return None
+
+
+def _is_partial_prefill(m: _MessageInput) -> bool:
+    partial = m.partial if isinstance(m, Message) else m.get("partial")
+    return partial is True
+
+
+def _enforce_single_turn(messages: list[_MessageInput]) -> None:
+    """Reject manual multi-turn payloads — Session owns multi-turn state.
+
+    Allowed shapes for raw ``chat.create()``: ``[system?, user]`` or, for
+    prefill mode, ``[system?, user, assistant(partial=True)]``.
+    """
+    last = len(messages) - 1
+    for i, m in enumerate(messages):
+        role = _message_role(m)
+        if role is Role.TOOL:
+            raise ManualMultiTurnError(
+                f"chat.create() refuses payloads containing tool results. "
+                f"{_SESSION_HINT}"
+            )
+        if role is Role.ASSISTANT and not (i == last and _is_partial_prefill(m)):
+            raise ManualMultiTurnError(
+                f"chat.create() refuses payloads with a prior assistant "
+                f"message. {_SESSION_HINT}"
+            )
 
 
 def _allowed_chat_params() -> frozenset[str]:
@@ -107,6 +150,21 @@ class Chat:
         stream: bool = False,
         **params: Any,
     ) -> ChatCompletion | Iterator[ChatCompletionChunk]:
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        return self._create(model=model, messages=messages, stream=stream, **params)
+
+    def _create(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        stream: bool = False,
+        **params: Any,
+    ) -> ChatCompletion | Iterator[ChatCompletionChunk]:
+        """Internal: same as :meth:`create` but skips the manual-multi-turn
+        gate. Used by :class:`Session` and :func:`run_tools`, which manage
+        history correctly. Not part of the public API."""
         body = _build_request_body(
             model=model,
             messages=messages,
@@ -177,6 +235,20 @@ class AsyncChat:
     ) -> AsyncIterator[ChatCompletionChunk]: ...
 
     async def create(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        stream: bool = False,
+        **params: Any,
+    ) -> ChatCompletion | AsyncIterator[ChatCompletionChunk]:
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        return await self._create(
+            model=model, messages=messages, stream=stream, **params
+        )
+
+    async def _create(
         self,
         *,
         model: Model | str,

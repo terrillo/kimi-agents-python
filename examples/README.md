@@ -18,7 +18,7 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 | 02 | [`02_streaming.py`](02_streaming.py) | Token-by-token streaming |
 | 03 | [`03_async_chat.py`](03_async_chat.py) | `AsyncKimiClient` + `asyncio.gather` fan-out |
 | 04 | [`04_thinking.py`](04_thinking.py) | `kimi-k2.6` with `thinking={"type":"enabled"}` and `reasoning_content` |
-| 05 | [`05_tool_calling.py`](05_tool_calling.py) | Function tools + tool-result follow-up turn |
+| 05 | [`05_tool_calling.py`](05_tool_calling.py) | Function tools + tool-result follow-up via `Session` |
 | 06 | [`06_vision.py`](06_vision.py) | Base64 image input (pass a local image path) |
 | 07 | [`07_json_schema.py`](07_json_schema.py) | Structured output via `response_format=json_schema` |
 | 08 | [`08_partial_mode.py`](08_partial_mode.py) | Prefilling the assistant message |
@@ -31,6 +31,8 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 | 15 | [`15_thinking_tools.py`](15_thinking_tools.py) | `kimi-k2-thinking` multi-step tool calls (`run_tools` preserves `reasoning_content`) |
 | 16 | [`16_files.py`](16_files.py) | `client.files` upload, extract content, chat over it, delete |
 | 17 | [`17_batches.py`](17_batches.py) | `client.batches` create + poll + fetch JSONL results |
+| 18 | [`18_session_basic.py`](18_session_basic.py) | `Session` multi-turn chat — auto-echoes `reasoning_content`, tracks per-session usage |
+| 19 | [`19_session_fork_checkpoint.py`](19_session_fork_checkpoint.py) | `Session.fork()` for branching + `checkpoint()` / `restore()` for rollback |
 
 ## Notes
 

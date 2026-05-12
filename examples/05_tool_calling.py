@@ -1,8 +1,14 @@
-"""Tool calling — model invokes a Python function, we feed back the result."""
+"""Tool calling — model invokes a Python function and we feed the result back.
+
+Multi-turn flows (including the tool_call → tool_result follow-up turn) must
+go through Session — the raw chat.create() refuses payloads with a prior
+assistant or tool message. Session drives the loop and keeps history
+consistent.
+"""
 
 import json
 
-from kimi_agents_python import KimiClient, Model
+from kimi_agents_python import KimiClient, Model, Session
 
 
 def get_weather(city: str) -> dict:
@@ -25,25 +31,16 @@ TOOLS = [
 ]
 
 
-messages: list[dict] = [{"role": "user", "content": "What's the weather in Tokyo?"}]
-
 with KimiClient() as client:
-    first = client.chat.create(model=Model.KIMI_K2_0905_PREVIEW, messages=messages, tools=TOOLS)
-    assistant = first.choices[0].message
+    sess = Session(client, model=Model.KIMI_K2_0905_PREVIEW, tools=TOOLS)
+    first = sess.send("What's the weather in Tokyo?")
 
-    if not assistant.tool_calls:
-        print(assistant.content)
+    if not first.tool_calls:
+        print(first.content)
     else:
-        messages.append(
-            {
-                "role": "assistant",
-                "content": assistant.content,
-                "tool_calls": [tc.model_dump() for tc in assistant.tool_calls],
-            }
-        )
-        for tc in assistant.tool_calls:
+        for tc in first.tool_calls:
             result = get_weather(**json.loads(tc.function.arguments))
-            messages.append(
+            sess.append(
                 {
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -51,7 +48,5 @@ with KimiClient() as client:
                     "content": json.dumps(result),
                 }
             )
-        final = client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW, messages=messages, tools=TOOLS
-        )
-        print(final.choices[0].message.content)
+        final = sess.send()  # no new user turn; just ask for the follow-up
+        print(final.content)

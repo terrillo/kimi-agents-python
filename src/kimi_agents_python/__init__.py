@@ -44,6 +44,7 @@ from .exceptions import (
     KimiRateLimitError,
     KimiServerError,
     KimiToolLoopError,
+    ManualMultiTurnError,
     PermissionDeniedError,
     RateLimitReachedError,
     ReadOnlyStreakExceededError,
@@ -55,7 +56,8 @@ from .exceptions import (
     UnexpectedOutputError,
 )
 from ._retry import DEFAULT_RETRY, NO_RETRY, RetryConfig
-from ._stats import CacheStats
+from ._stats import CacheStats, TokenStats
+from .session import AsyncSession, Session
 from .specs import MODEL_SPECS, ModelSpec, get_model_spec
 from .tools import KimiTool, LoopGuards, arun_tools, kimi_tool, run_tools
 from .resources.files import FileContent
@@ -102,6 +104,7 @@ __all__ = [
     "AVAILABLE_MODELS",
     "AssistantMessage",
     "AsyncKimiClient",
+    "AsyncSession",
     "BATCH_FORMATS",
     "BalanceData",
     "BalanceInfo",
@@ -153,6 +156,7 @@ __all__ = [
     "MAX_FILES",
     "MAX_TOTAL_BYTES",
     "MODEL_SPECS",
+    "ManualMultiTurnError",
     "Message",
     "Model",
     "ModelInfo",
@@ -170,6 +174,7 @@ __all__ = [
     "RetryConfig",
     "Role",
     "ServerErrorResponse",
+    "Session",
     "StreamChoice",
     "StreamOptions",
     "TextPart",
@@ -180,6 +185,7 @@ __all__ = [
     "TokenBudgetExceededError",
     "TokenEstimate",
     "TokenEstimateData",
+    "TokenStats",
     "ToolCall",
     "ToolChoice",
     "ToolDef",
