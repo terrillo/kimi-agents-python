@@ -181,6 +181,151 @@ branch = sess.fork()                                    # tree-of-thought
 
 `AsyncSession` mirrors the surface against `AsyncKimiClient`. `run_tools` / `arun_tools` are the lower-level alternatives for one-shot tool loops.
 
+## Agents
+
+`KimiAgent` bundles everything needed to run an agent — model, instructions, tools, handoffs, guards — into a single configuration object. `Runner` executes it.
+
+```python
+import asyncio
+from kimi_agents_python import AsyncKimiClient, KimiAgent, Model, Runner
+
+async def main() -> None:
+    async with AsyncKimiClient() as client:
+        agent = KimiAgent(
+            name="assistant",
+            model=Model.KIMI_K2_6,
+            instructions="You are a terse, precise assistant.",
+        )
+        result = await Runner.run(agent, "What is the capital of France?", client=client)
+        print(result.final_output)
+        print(f"tokens: {result.usage.total_tokens}  cost: ${result.cost_usd:.6f}")
+
+asyncio.run(main())
+```
+
+`Runner` is stateless — all execution state lives in the returned `RunResult`:
+
+| Field | Type | Contents |
+|---|---|---|
+| `final_output` | `str` | The agent's final text answer |
+| `messages` | `list[Message]` | Full conversation transcript |
+| `last_agent` | `KimiAgent` | Which agent produced the final answer (may differ after handoffs) |
+| `usage` | `TokenStats` | Prompt / completion / total / cached tokens + cost |
+| `cost_usd` | `Decimal` | Total USD cost for this run |
+
+`Runner.run_sync()` wraps `asyncio.run()` for scripts that can't use `async def`. Do not call it from inside an async context.
+
+### Agent tools
+
+Pass `@kimi_tool`-decorated functions in `tools`. The async runner dispatches tools marked `can_parallel=True` concurrently:
+
+```python
+from typing import Annotated
+from pydantic import Field
+from kimi_agents_python import AsyncKimiClient, KimiAgent, LoopGuards, Model, Runner, kimi_tool
+
+@kimi_tool(read_only=True, can_parallel=True)
+def get_weather(city: Annotated[str, Field(description="City name")]) -> dict:
+    """Get current weather for a city."""
+    return {"city": city, "temp_c": 21, "conditions": "sunny"}
+
+async def main() -> None:
+    async with AsyncKimiClient() as client:
+        agent = KimiAgent(
+            name="weather_bot",
+            model=Model.KIMI_K2_6,
+            instructions="Answer weather questions using available tools.",
+            tools=[get_weather],
+            guards=LoopGuards(max_tokens=50_000, repeat_threshold=3),
+            max_steps=8,
+        )
+        result = await Runner.run(agent, "Weather in Tokyo?", client=client)
+        print(result.final_output)
+```
+
+### Handoffs (multi-agent)
+
+Agents in `handoffs` are automatically converted to tools so the parent model can delegate via function calls. `Runner` wires the client at run time — no manual plumbing required.
+
+```python
+researcher = KimiAgent(
+    name="researcher",
+    model=Model.KIMI_K2_6,
+    instructions="Find accurate information. Cite sources.",
+    tools=[web_search],
+    model_settings={"thinking": {"type": "disabled"}},  # required for web_search
+)
+
+orchestrator = KimiAgent(
+    name="orchestrator",
+    model=Model.KIMI_K2_6,
+    instructions="Delegate research tasks to the researcher, then synthesise an answer.",
+    handoffs=[researcher],
+)
+
+result = await Runner.run(orchestrator, "Compare Kimi K2.6 and GPT-5.", client=client)
+print(result.last_agent.name)  # which agent finished the job
+```
+
+For explicit control, `handoff(agent, client)` builds the tool directly so you can add it to `tools` yourself:
+
+```python
+from kimi_agents_python import handoff
+
+parent = KimiAgent(
+    name="parent",
+    tools=[handoff(researcher, client=client)],
+)
+```
+
+### Parallel agents
+
+`Runner.run_parallel()` runs independent `(agent, prompt)` pairs concurrently. Total wall time ≈ the slowest single call:
+
+```python
+results = await Runner.run_parallel(
+    [
+        (market_agent, "What drives AI chip demand in 2025?"),
+        (tech_agent, "Explain transformer attention in two sentences."),
+        (legal_agent, "What is a non-compete clause?"),
+    ],
+    client=client,
+)
+
+for r in results:
+    print(f"[{r.last_agent.name}] {r.final_output}")
+
+total_cost = sum(r.cost_usd for r in results)
+```
+
+### Cancellation
+
+Pass a `RunContext` to share cancellation across agents. `ctx.cancel.set()` causes any agent that hasn't started yet to raise `RunCancelledError`:
+
+```python
+from kimi_agents_python import RunContext, RunCancelledError
+
+ctx = RunContext()
+
+try:
+    results = await Runner.run_parallel(
+        [(a, "q1"), (b, "q2")],
+        client=client,
+        context=ctx,
+    )
+except RunCancelledError:
+    ...
+
+# From another task:
+ctx.cancel.set()   # signals all agents sharing this context
+```
+
+`ctx.metadata` is a free-form dict for passing caller context (request ids, user ids, etc.) into hooks or tools:
+
+```python
+ctx = RunContext(metadata={"request_id": "abc-123", "user": "terrillo"})
+```
+
 ## Tool calling
 
 ```python
@@ -621,12 +766,16 @@ uv run python examples/01_basic_chat.py
 | `26_token_preflight.py` | `session.estimated_tokens(content)` before send |
 | `27_stream_reconnect.py` | `chat.stream_with_reconnect(...)` |
 | `28_moonpalace.py` | `KimiClient.with_moonpalace()` local debugging |
+| `29_agent_basic.py` | `KimiAgent` + `Runner.run()` — simplest agent, no tools |
+| `30_agent_tools.py` | Agent with `@kimi_tool` functions, parallel dispatch, `LoopGuards` |
+| `31_agent_handoffs.py` | Multi-agent handoffs — orchestrator delegates to specialists |
+| `32_agent_parallel.py` | `Runner.run_parallel()` — concurrent agents, cost aggregation |
 
 ## Development
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 220+ tests, <1s
+uv run pytest                      # 272+ tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 

@@ -33,10 +33,24 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 | 17 | [`17_batches.py`](17_batches.py) | `client.batches` create + poll + fetch JSONL results |
 | 18 | [`18_session_basic.py`](18_session_basic.py) | `Session` multi-turn chat — auto-echoes `reasoning_content`, tracks per-session usage |
 | 19 | [`19_session_fork_checkpoint.py`](19_session_fork_checkpoint.py) | `Session.fork()` for branching + `checkpoint()` / `restore()` for rollback |
+| 20 | [`20_web_search.py`](20_web_search.py) | `$web_search` builtin tool |
+| 21 | [`21_formula_tools.py`](21_formula_tools.py) | Official Formula tools |
+| 22 | [`22_prefill_helper.py`](22_prefill_helper.py) | `chat.prefill()` assistant-message scaffolding |
+| 23 | [`23_structured_parse.py`](23_structured_parse.py) | `chat.parse(response_format=...)` typed structured output |
+| 24 | [`24_stream_events.py`](24_stream_events.py) | Typed stream events (`TextDelta`, `ReasoningDelta`, `Done`, …) |
+| 25 | [`25_cost_tracking.py`](25_cost_tracking.py) | Per-session `cost_usd` accumulation |
+| 26 | [`26_token_preflight.py`](26_token_preflight.py) | `session.estimated_tokens()` before send |
+| 27 | [`27_stream_reconnect.py`](27_stream_reconnect.py) | `chat.stream_with_reconnect()` auto-resume |
+| 28 | [`28_moonpalace.py`](28_moonpalace.py) | `KimiClient.with_moonpalace()` local debugging proxy |
+| **29** | **[`29_agent_basic.py`](29_agent_basic.py)** | **`KimiAgent` + `Runner.run()` — simplest agent, no tools** |
+| **30** | **[`30_agent_tools.py`](30_agent_tools.py)** | **`KimiAgent` with `@kimi_tool` functions, parallel dispatch, `LoopGuards`** |
+| **31** | **[`31_agent_handoffs.py`](31_agent_handoffs.py)** | **Multi-agent handoffs — orchestrator delegates to specialist sub-agents** |
+| **32** | **[`32_agent_parallel.py`](32_agent_parallel.py)** | **`Runner.run_parallel()` — concurrent agents, shared `RunContext`, cost aggregation** |
 
 ## Notes
 
-- The default model is `kimi-k2-0905-preview` because it accepts flexible parameters. `kimi-k2.6` is used where its features (thinking, vision) are the point.
+- The default model for most examples is `kimi-k2-0905-preview` because it accepts flexible parameters. `kimi-k2.6` is used where its features (thinking, vision) are the point. Agent examples use `kimi-k2.6` because it is the primary production model.
 - `06_vision.py` takes an image path argument: `uv run python examples/06_vision.py path/to/photo.png`.
 - `10_file_validation.py` is the only example that doesn't call the API — useful as a sanity-check before adding billing keys.
 - These scripts hit the live API and cost real tokens. Run `09_helpers.py` first to check your balance.
+- Agent examples (29–32) all use `AsyncKimiClient` — `Runner` is async-first. `Runner.run_sync()` wraps `asyncio.run()` for scripts that can't use `async def main()`.

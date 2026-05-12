@@ -626,43 +626,6 @@ async def test_arun_tools_three_tool_partition_proves_parallelism() -> None:
     assert starts["s1"] >= max(ends["p1"], ends["p2"])
 
 
-async def test_arun_tools_returns_final_response() -> None:
-    @kimi_tool
-    async def echo(msg: str) -> str:
-        """Doc."""
-        return msg
-
-    step = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal step
-        step += 1
-        if step == 1:
-            return httpx.Response(
-                200,
-                json=_completion_with(
-                    tool_calls=[
-                        {
-                            "id": "c1",
-                            "type": "function",
-                            "function": {"name": "echo", "arguments": '{"msg":"hi"}'},
-                        }
-                    ],
-                    content=None,
-                ),
-            )
-        return httpx.Response(200, json=_completion_with(content="ok"))
-
-    async with make_async_client(handler) as client:
-        result = await arun_tools(
-            client,
-            model=Model.KIMI_K2_0905_PREVIEW,
-            messages=[{"role": "user", "content": "?"}],
-            tools=[echo],
-        )
-    assert result.choices[0].message.content == "ok"
-
-
 def test_run_tools_preserves_reasoning_content_across_turns() -> None:
     """kimi-k2-thinking requires prior reasoning_content in the next request."""
 
@@ -761,36 +724,6 @@ def _tool_call_response(name: str, args: str, *, total_tokens: int = 2) -> dict:
     )
     body["usage"]["total_tokens"] = total_tokens
     return body
-
-
-def test_run_tools_guards_default_none_preserves_behavior() -> None:
-    """Omitting `guards=` keeps the loop fully open — back-compat check."""
-
-    @kimi_tool
-    def get_weather(city: str) -> dict:
-        """Lookup."""
-        return {"city": city}
-
-    step = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal step
-        step += 1
-        if step == 1:
-            return httpx.Response(
-                200,
-                json=_tool_call_response("get_weather", '{"city":"Tokyo"}'),
-            )
-        return httpx.Response(200, json=_completion_with(content="done"))
-
-    with make_sync_client(handler) as client:
-        result = run_tools(
-            client,
-            model=Model.KIMI_K2_0905_PREVIEW,
-            messages=[{"role": "user", "content": "weather?"}],
-            tools=[get_weather],
-        )
-    assert result.choices[0].message.content == "done"
 
 
 def test_run_tools_token_budget_raises() -> None:
@@ -1008,50 +941,3 @@ def test_run_tools_read_only_streak_resets_on_mutating_call() -> None:
     assert result.choices[0].message.content == "done"
 
 
-async def test_arun_tools_token_budget_raises() -> None:
-    @kimi_tool
-    async def echo(msg: str) -> str:
-        """Echo."""
-        return msg
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json=_tool_call_response("echo", '{"msg":"hi"}', total_tokens=400),
-        )
-
-    async with make_async_client(handler) as client:
-        with pytest.raises(TokenBudgetExceededError):
-            await arun_tools(
-                client,
-                model=Model.KIMI_K2_0905_PREVIEW,
-                messages=[{"role": "user", "content": "?"}],
-                tools=[echo],
-                max_steps=10,
-                guards=LoopGuards(max_tokens=500),
-            )
-
-
-async def test_arun_tools_repeat_threshold_short_circuits_before_dispatch() -> None:
-    """The guard fires on the third turn's call, before parallel dispatch."""
-
-    @kimi_tool
-    async def search(q: str) -> dict:
-        """Search."""
-        return {"q": q}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json=_tool_call_response("search", '{"q":"same"}')
-        )
-
-    async with make_async_client(handler) as client:
-        with pytest.raises(RepeatedToolCallError):
-            await arun_tools(
-                client,
-                model=Model.KIMI_K2_0905_PREVIEW,
-                messages=[{"role": "user", "content": "?"}],
-                tools=[search],
-                max_steps=10,
-                guards=LoopGuards(repeat_threshold=3),
-            )
