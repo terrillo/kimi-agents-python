@@ -1,22 +1,27 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import AsyncExitStack, ExitStack
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 import httpx
+from pydantic import BaseModel, TypeAdapter
 
 from .._enums import Model, Role
 from .._http import parse_sse_line, raise_for_status
 from .._retry import retry_async, retry_sync
 from ..exceptions import ManualMultiTurnError
 from ..specs import get_model_spec
-from ..tools import KimiTool
 from ..types import (
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionRequest,
     Message,
+    ParsedChatCompletion,
+    PrefilledCompletion,
 )
 
 if TYPE_CHECKING:
@@ -79,6 +84,53 @@ def _allowed_chat_params() -> frozenset[str]:
 
 _ALLOWED_CHAT_PARAMS = _allowed_chat_params()
 
+T = TypeVar("T")
+
+
+def _resolve_schema(
+    response_format: type[BaseModel] | TypeAdapter[Any] | Any,
+) -> tuple[dict[str, Any], str, Any]:
+    """Return (json_schema, name, parser) for chat.parse().
+
+    Accepts a Pydantic ``BaseModel`` subclass, a ``TypeAdapter``, or any type
+    that ``TypeAdapter`` can wrap (e.g. ``list[int]``, ``dict[str, Foo]``).
+    """
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        cls = response_format
+        return (
+            cls.model_json_schema(),
+            cls.__name__,
+            cls.model_validate_json,
+        )
+    adapter: TypeAdapter[Any]
+    name = "Response"
+    if isinstance(response_format, TypeAdapter):
+        adapter = response_format
+    else:
+        adapter = TypeAdapter(response_format)
+        rt = getattr(response_format, "__name__", None)
+        if isinstance(rt, str):
+            name = rt
+    return (
+        adapter.json_schema(),
+        name,
+        lambda s: adapter.validate_python(json.loads(s)),
+    )
+
+
+def _coerce_tool(t: Any) -> dict[str, Any]:
+    """Convert a tool entry to the wire-format dict.
+
+    Accepts: a pre-built dict, a Pydantic ToolDef/BuiltinToolDef, or any object
+    exposing ``to_tool_def()``. Pydantic models are dumped with aliases applied
+    so ``parameters`` etc. land at the right keys.
+    """
+    if hasattr(t, "to_tool_def"):
+        t = t.to_tool_def()
+    if hasattr(t, "model_dump"):
+        return t.model_dump(exclude_none=True, by_alias=True, mode="json")
+    return t
+
 
 def _build_request_body(
     *,
@@ -100,13 +152,7 @@ def _build_request_body(
     if default_cache_key is not None and "prompt_cache_key" not in extra:
         extra = {**extra, "prompt_cache_key": default_cache_key}
     if extra.get("tools"):
-        extra = {
-            **extra,
-            "tools": [
-                t.to_tool_def() if isinstance(t, KimiTool) else t
-                for t in extra["tools"]
-            ],
-        }
+        extra = {**extra, "tools": [_coerce_tool(t) for t in extra["tools"]]}
     payload: dict[str, Any] = {
         "model": str(model),
         "messages": list(messages),
@@ -173,13 +219,15 @@ class Chat:
             default_cache_key=self._client._prompt_cache_key,
         )
         if stream:
-            return self._stream(body)
+            return self._stream(body, model=model)
         response = self._client._request("POST", "/chat/completions", json=body)
         completion = ChatCompletion.model_validate(response.json())
-        self._client.cache_stats.record(completion.usage)
+        self._client.cache_stats.record(completion.usage, model=model)
         return completion
 
-    def _stream(self, body: dict[str, Any]) -> Iterator[ChatCompletionChunk]:
+    def _stream(
+        self, body: dict[str, Any], *, model: Model | str
+    ) -> Iterator[ChatCompletionChunk]:
         def _open() -> tuple[ExitStack, httpx.Response]:
             stack = ExitStack()
             try:
@@ -206,8 +254,138 @@ class Chat:
                 if chunk is None:
                     continue
                 parsed = ChatCompletionChunk.model_validate(chunk)
-                self._client.cache_stats.record(parsed.usage)
+                self._client.cache_stats.record(parsed.usage, model=model)
                 yield parsed
+
+    def prefill(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        prefill: str,
+        **params: Any,
+    ) -> PrefilledCompletion:
+        """Send a partial-mode request and get back ``prefill + new tokens``.
+
+        ``messages`` should *not* include the assistant prefill — this helper
+        appends ``{"role": "assistant", "content": prefill, "partial": True}``
+        for you and concatenates the response onto the prefill in
+        ``PrefilledCompletion.text``.
+        """
+        msgs = list(messages) + [
+            Message(role=Role.ASSISTANT, content=prefill, partial=True)
+        ]
+        completion = self._create(model=model, messages=msgs, **params)
+        assert isinstance(completion, ChatCompletion)
+        body = completion.choices[0].message.content or ""
+        return PrefilledCompletion(completion=completion, text=prefill + body)
+
+    def parse(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        response_format: type[T] | TypeAdapter[T] | Any,
+        **params: Any,
+    ) -> ParsedChatCompletion[T]:
+        """Constrain output to a JSON schema and return a parsed value.
+
+        ``response_format`` accepts a Pydantic ``BaseModel`` subclass, a
+        ``TypeAdapter`` (e.g. ``TypeAdapter(list[int])``), or any type
+        ``TypeAdapter`` can wrap. The schema is sent as
+        ``response_format={"type":"json_schema","json_schema":{...}}``.
+        """
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        schema, name, parser = _resolve_schema(response_format)
+        rf = {
+            "type": "json_schema",
+            "json_schema": {"name": name, "schema": schema, "strict": True},
+        }
+        completion = self._create(
+            model=model, messages=messages, response_format=rf, **params
+        )
+        assert isinstance(completion, ChatCompletion)
+        parsed = parser(completion.choices[0].message.content or "")
+        return ParsedChatCompletion(completion=completion, parsed=parsed)
+
+    def stream_events(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        **params: Any,
+    ) -> Iterator[Any]:
+        """Stream the response as typed events (TextDelta, ReasoningDelta, …).
+
+        Convenience wrapper around ``create(stream=True, ...)`` +
+        :func:`kimi_agents_python.stream_events`.
+        """
+        from ..events import stream_events
+
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        chunks = self._create(model=model, messages=messages, stream=True, **params)
+        assert not isinstance(chunks, ChatCompletion)
+        yield from stream_events(chunks)
+
+    def stream_with_reconnect(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        max_attempts: int = 5,
+        retry_delay: float = 1.0,
+        **params: Any,
+    ) -> Iterator[ChatCompletionChunk]:
+        """Stream chunks with prefill-based resumption on transport errors.
+
+        On ``httpx.RemoteProtocolError`` / ``ReadError`` / ``ReadTimeout`` the
+        wrapper restarts the request with the accumulated text appended as a
+        partial-mode assistant prefill. Tool-call streams cannot be safely
+        resumed (partial JSON arguments would corrupt on replay): if any
+        tool-call delta has already been emitted when the drop happens, the
+        original transport error is propagated.
+        """
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        content_parts: list[str] = []
+        saw_tool_call = False
+        for attempt in range(max_attempts):
+            try:
+                resume = (
+                    messages + [
+                        Message(
+                            role=Role.ASSISTANT,
+                            content="".join(content_parts),
+                            partial=True,
+                        )
+                    ]
+                    if content_parts
+                    else messages
+                )
+                stream = self._create(
+                    model=model, messages=resume, stream=True, **params
+                )
+                assert not isinstance(stream, ChatCompletion)
+                for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        content_parts.append(delta.content)
+                    if delta and delta.tool_calls:
+                        saw_tool_call = True
+                    yield chunk
+                return
+            except (
+                httpx.RemoteProtocolError,
+                httpx.ReadError,
+                httpx.ReadTimeout,
+            ):
+                if saw_tool_call:
+                    raise
+                if attempt + 1 == max_attempts:
+                    raise
+                time.sleep(retry_delay)
 
 
 class AsyncChat:
@@ -264,16 +442,16 @@ class AsyncChat:
             default_cache_key=self._client._prompt_cache_key,
         )
         if stream:
-            return self._stream(body)
+            return self._stream(body, model=model)
         response = await self._client._request(
             "POST", "/chat/completions", json=body
         )
         completion = ChatCompletion.model_validate(response.json())
-        self._client.cache_stats.record(completion.usage)
+        self._client.cache_stats.record(completion.usage, model=model)
         return completion
 
     async def _stream(
-        self, body: dict[str, Any]
+        self, body: dict[str, Any], *, model: Model | str
     ) -> AsyncIterator[ChatCompletionChunk]:
         async def _open() -> tuple[AsyncExitStack, httpx.Response]:
             stack = AsyncExitStack()
@@ -301,5 +479,114 @@ class AsyncChat:
                 if chunk is None:
                     continue
                 parsed = ChatCompletionChunk.model_validate(chunk)
-                self._client.cache_stats.record(parsed.usage)
+                self._client.cache_stats.record(parsed.usage, model=model)
                 yield parsed
+
+    async def prefill(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        prefill: str,
+        **params: Any,
+    ) -> PrefilledCompletion:
+        """Async counterpart to :meth:`Chat.prefill`."""
+        msgs = list(messages) + [
+            Message(role=Role.ASSISTANT, content=prefill, partial=True)
+        ]
+        completion = await self._create(model=model, messages=msgs, **params)
+        assert isinstance(completion, ChatCompletion)
+        body = completion.choices[0].message.content or ""
+        return PrefilledCompletion(completion=completion, text=prefill + body)
+
+    async def parse(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        response_format: type[T] | TypeAdapter[T] | Any,
+        **params: Any,
+    ) -> ParsedChatCompletion[T]:
+        """Async counterpart to :meth:`Chat.parse`."""
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        schema, name, parser = _resolve_schema(response_format)
+        rf = {
+            "type": "json_schema",
+            "json_schema": {"name": name, "schema": schema, "strict": True},
+        }
+        completion = await self._create(
+            model=model, messages=messages, response_format=rf, **params
+        )
+        assert isinstance(completion, ChatCompletion)
+        parsed = parser(completion.choices[0].message.content or "")
+        return ParsedChatCompletion(completion=completion, parsed=parsed)
+
+    async def stream_events(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        **params: Any,
+    ) -> AsyncIterator[Any]:
+        """Async counterpart to :meth:`Chat.stream_events`."""
+        from ..events import astream_events
+
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        chunks = await self._create(
+            model=model, messages=messages, stream=True, **params
+        )
+        assert not isinstance(chunks, ChatCompletion)
+        async for ev in astream_events(chunks):
+            yield ev
+
+    async def stream_with_reconnect(
+        self,
+        *,
+        model: Model | str,
+        messages: Iterable[_MessageInput],
+        max_attempts: int = 5,
+        retry_delay: float = 1.0,
+        **params: Any,
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        """Async counterpart to :meth:`Chat.stream_with_reconnect`."""
+        messages = list(messages)
+        _enforce_single_turn(messages)
+        content_parts: list[str] = []
+        saw_tool_call = False
+        for attempt in range(max_attempts):
+            try:
+                resume = (
+                    messages + [
+                        Message(
+                            role=Role.ASSISTANT,
+                            content="".join(content_parts),
+                            partial=True,
+                        )
+                    ]
+                    if content_parts
+                    else messages
+                )
+                stream = await self._create(
+                    model=model, messages=resume, stream=True, **params
+                )
+                assert not isinstance(stream, ChatCompletion)
+                async for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        content_parts.append(delta.content)
+                    if delta and delta.tool_calls:
+                        saw_tool_call = True
+                    yield chunk
+                return
+            except (
+                httpx.RemoteProtocolError,
+                httpx.ReadError,
+                httpx.ReadTimeout,
+            ):
+                if saw_tool_call:
+                    raise
+                if attempt + 1 == max_attempts:
+                    raise
+                await asyncio.sleep(retry_delay)

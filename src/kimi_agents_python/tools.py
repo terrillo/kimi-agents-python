@@ -6,7 +6,7 @@ import json
 from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, get_type_hints, overload
+from typing import TYPE_CHECKING, Any, Protocol, get_type_hints, overload, runtime_checkable
 
 from pydantic import BaseModel, create_model
 from pydantic.fields import FieldInfo
@@ -26,6 +26,24 @@ if TYPE_CHECKING:
 
 
 _SENTINEL = object()
+
+
+@runtime_checkable
+class ToolLike(Protocol):
+    """Anything the chat / tool-loop dispatcher accepts as a tool.
+
+    Implemented by :class:`KimiTool` (user functions), :class:`BuiltinTool`
+    (server-side builtins like ``$web_search``), and :class:`FormulaTool`
+    (official Moonshot Formula API tools).
+    """
+
+    name: str
+    read_only: bool
+    can_parallel: bool
+
+    def to_tool_def(self) -> Any: ...
+    def invoke(self, arguments: str | dict[str, Any]) -> str: ...
+    async def ainvoke(self, arguments: str | dict[str, Any]) -> str: ...
 
 
 def _default_failure(tool_name: str) -> Callable[[Exception], str]:
@@ -329,7 +347,7 @@ class _LoopState:
                 f"{self.total_tokens} > {self.guards.max_tokens}"
             )
 
-    def record_call(self, tool: KimiTool | None, tc: Any) -> None:
+    def record_call(self, tool: ToolLike | None, tc: Any) -> None:
         threshold = self.guards.repeat_threshold
         if threshold is not None:
             key = (tc.function.name, _normalize_args(tc.function.arguments))
@@ -358,7 +376,7 @@ def _run_tools_inner(
     *,
     model: Model | str,
     messages: Sequence[dict | Message],
-    tools: Sequence[KimiTool],
+    tools: Sequence[ToolLike],
     max_steps: int,
     guards: LoopGuards | None,
     **chat_kwargs: Any,
@@ -402,7 +420,7 @@ def run_tools(
     *,
     model: Model | str,
     messages: Sequence[dict | Message],
-    tools: Sequence[KimiTool],
+    tools: Sequence[ToolLike],
     max_steps: int = 5,
     guards: LoopGuards | None = None,
     **chat_kwargs: Any,
@@ -432,7 +450,7 @@ async def _arun_tools_inner(
     *,
     model: Model | str,
     messages: Sequence[dict | Message],
-    tools: Sequence[KimiTool],
+    tools: Sequence[ToolLike],
     max_steps: int,
     guards: LoopGuards | None,
     **chat_kwargs: Any,
@@ -492,7 +510,7 @@ async def arun_tools(
     *,
     model: Model | str,
     messages: Sequence[dict | Message],
-    tools: Sequence[KimiTool],
+    tools: Sequence[ToolLike],
     max_steps: int = 5,
     guards: LoopGuards | None = None,
     **chat_kwargs: Any,

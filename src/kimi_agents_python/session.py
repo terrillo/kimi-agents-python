@@ -135,8 +135,8 @@ class _BaseSession:
         return msg
 
     def _record_usage(self, usage: Usage | None) -> None:
-        self.cache_stats.record(usage)
-        self.usage.record(usage)
+        self.cache_stats.record(usage, model=self._model)
+        self.usage.record(usage, model=self._model)
 
 
 class Session(_BaseSession):
@@ -245,6 +245,36 @@ class Session(_BaseSession):
         child._messages = _copy_messages(self._messages)
         return child
 
+    def estimated_tokens(self, content: str | None = None) -> int:
+        """Pre-flight token count for ``history (+ optional pending user turn)``.
+
+        Calls ``client.tokenizers.estimate`` against the current message list,
+        optionally appending a draft user turn. Useful for guarding against
+        ``MODEL_SPECS[model].context_length`` before issuing a request.
+        """
+        msgs = list(self._messages)
+        if content is not None:
+            msgs.append(Message(role=Role.USER, content=content))
+        return self._client.tokenizers.estimate(
+            model=self._model, messages=msgs
+        ).data.total_tokens
+
+    def stream_events(
+        self,
+        content: str | None = None,
+        **overrides: Any,
+    ) -> Iterator[Any]:
+        """Stream a user turn as typed events (TextDelta, ReasoningDelta, …).
+
+        Mirrors :meth:`stream` but yields :class:`~kimi_agents_python.events.StreamEvent`
+        objects. History and per-session stats are still updated from the
+        underlying chunks when the iterator is exhausted.
+        """
+        from .events import stream_events
+
+        chunks = self.stream(content, **overrides)
+        yield from stream_events(chunks)
+
 
 class AsyncSession(_BaseSession):
     """Async counterpart to :class:`Session`."""
@@ -334,3 +364,25 @@ class AsyncSession(_BaseSession):
         )
         child._messages = _copy_messages(self._messages)
         return child
+
+    async def estimated_tokens(self, content: str | None = None) -> int:
+        """Async counterpart to :meth:`Session.estimated_tokens`."""
+        msgs = list(self._messages)
+        if content is not None:
+            msgs.append(Message(role=Role.USER, content=content))
+        est = await self._client.tokenizers.estimate(
+            model=self._model, messages=msgs
+        )
+        return est.data.total_tokens
+
+    async def stream_events(
+        self,
+        content: str | None = None,
+        **overrides: Any,
+    ) -> AsyncIterator[Any]:
+        """Async counterpart to :meth:`Session.stream_events`."""
+        from .events import astream_events
+
+        chunks = self.stream(content, **overrides)
+        async for ev in astream_events(chunks):
+            yield ev

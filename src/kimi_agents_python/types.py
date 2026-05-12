@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from dataclasses import dataclass
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,6 +73,21 @@ class ToolDef(_Base):
     function: FunctionDef
 
 
+class BuiltinFunctionRef(_Base):
+    name: str
+
+
+class BuiltinToolDef(_Base):
+    """Wire shape for a Kimi `builtin_function` tool (e.g. `$web_search`).
+
+    Carries only ``type`` and ``function.name`` — the server owns the
+    implementation, so no parameter schema is sent.
+    """
+
+    type: Literal["builtin_function"] = "builtin_function"
+    function: BuiltinFunctionRef
+
+
 class Message(_Base):
     """A single chat message in the conversation history.
 
@@ -132,7 +148,9 @@ class ChatCompletionRequest(_Base):
     stream_options: StreamOptions | None = None
     stop: str | list[str] | None = None
     response_format: ResponseFormat | None = None
-    tools: list[ToolDef] | None = None
+    tools: (
+        list[Annotated[ToolDef | BuiltinToolDef, Field(discriminator="type")]] | None
+    ) = None
     tool_choice: ToolChoice | None = None
     prompt_cache_key: str | None = None
     safety_identifier: str | None = None
@@ -258,6 +276,53 @@ class BalanceInfo(_Base):
     data: BalanceData
 
 
+class FiberContext(_Base):
+    input: str | None = None
+    output: str | None = None
+    encrypted_output: str | None = None
+    error: str | None = None
+
+
+class FormulaFiber(_Base):
+    """Result of `POST /formulas/{uri}/fibers` — one Formula tool invocation."""
+
+    id: str
+    object: Literal["fiber"] = "fiber"
+    created_at: int | None = None
+    lambda_id: str | None = None
+    status: str
+    context: FiberContext = FiberContext()
+    formula: str | None = None
+    organization_id: str | None = None
+    project_id: str | None = None
+    error: str | None = None
+
+    @property
+    def output_str(self) -> str:
+        """The value to put in the ``role=tool`` message back to the model.
+
+        Prefers ``context.output`` (plain Formulas), falls back to
+        ``context.encrypted_output`` (protected Formulas like ``web-search``).
+        On non-``succeeded`` status, returns a stringified error so the model
+        can react instead of the caller seeing a None.
+        """
+        if self.status != "succeeded":
+            err = self.error or self.context.error or self.context.output
+            return f"Error: {err or 'fiber failed'}"
+        if self.context.output is not None:
+            return self.context.output
+        if self.context.encrypted_output is not None:
+            return self.context.encrypted_output
+        return ""
+
+
+class FormulaToolList(_Base):
+    """Result of `GET /formulas/{uri}/tools` — raw tool defs from a formula."""
+
+    object: Literal["list"] = "list"
+    tools: list[dict[str, Any]] = []
+
+
 class TokenEstimateData(_Base):
     total_tokens: int
 
@@ -319,3 +384,26 @@ class BatchList(_Base):
     object: Literal["list"] = "list"
     data: list[Batch]
     has_more: bool = False
+
+
+T = TypeVar("T")
+
+
+@dataclass(slots=True, frozen=True)
+class PrefilledCompletion:
+    """Result of :meth:`Chat.prefill` — the raw completion plus the prefilled text.
+
+    ``text`` is the prefill string concatenated with the model's continuation,
+    so callers can use it directly without remembering to splice.
+    """
+
+    completion: ChatCompletion
+    text: str
+
+
+@dataclass(slots=True, frozen=True)
+class ParsedChatCompletion(Generic[T]):
+    """Result of :meth:`Chat.parse` — the raw completion plus a typed value."""
+
+    completion: ChatCompletion
+    parsed: T

@@ -325,19 +325,31 @@ response = client.chat.create(
 
 ## Partial mode
 
-Prefill the assistant message to constrain the response shape. The API returns only the *new* tokens — concatenate the prefill yourself:
+Prefill the assistant message to constrain the response shape. The API returns only the *new* tokens — `chat.prefill()` handles the splicing for you:
 
 ```python
-PREFILL = "{"
-response = client.chat.create(
+result = client.chat.prefill(
     model=Model.KIMI_K2_0905_PREVIEW,
-    messages=[
-        {"role": "user", "content": "List three Python web frameworks as JSON."},
-        {"role": "assistant", "content": PREFILL, "partial": True},
-    ],
+    messages=[{"role": "user", "content": "List three Python web frameworks as JSON."}],
+    prefill="[",
 )
-body = PREFILL + response.choices[0].message.content
+print(result.text)  # already concatenated: "[ ... ]"
 ```
+
+The raw form is still available — just construct the partial assistant message yourself and concatenate after.
+
+## Platform features
+
+| Feature | Surface |
+|---|---|
+| Server-side web search (`$web_search`) | `from kimi_agents_python import web_search`; pass in `tools=[...]` and disable thinking |
+| Official tool catalog (Formulas) | `client.formulas.load("moonshot/web-search:latest")` returns drop-in tools |
+| Structured output | `client.chat.parse(response_format=MyPydanticModel)` → `ParsedChatCompletion[T]` |
+| Typed stream events | `for ev in client.chat.stream_events(...)` yields `TextDelta` / `ReasoningDelta` / `ToolCallDelta` / `UsageEvent` / `Done` |
+| Cost tracking | `session.usage.cost_usd` accumulates USD per session (uses `MODEL_PRICING`) |
+| Token preflight | `session.estimated_tokens("draft user turn")` before sending |
+| Stream auto-resume | `client.chat.stream_with_reconnect(...)` resumes via partial prefill on transport drops |
+| MoonPalace dev proxy | `KimiClient.with_moonpalace()` flips `base_url` to `http://127.0.0.1:9988/v1` |
 
 ## Vision
 
@@ -573,7 +585,7 @@ log.info("kimi turn: cached=%d / %d (%.1f%%)",
 
 ## Examples
 
-The [`examples/`](examples/) directory has 19 self-contained scripts, each under 60 lines:
+The [`examples/`](examples/) directory has self-contained scripts, each under 60 lines:
 
 ```bash
 uv run python examples/01_basic_chat.py
@@ -600,6 +612,15 @@ uv run python examples/01_basic_chat.py
 | `17_batches.py` | `client.batches` submit, poll, fetch results |
 | `18_session_basic.py` | `Session` multi-turn chat + per-session usage |
 | `19_session_fork_checkpoint.py` | `Session.fork()` branches + `checkpoint()` / `restore()` rollback |
+| `20_web_search.py` | `$web_search` builtin tool driven through `Session` |
+| `21_formula_tools.py` | Loading and invoking official Formula tools |
+| `22_prefill_helper.py` | `chat.prefill()` for assistant-message scaffolding |
+| `23_structured_parse.py` | `chat.parse(response_format=...)` returns a typed value |
+| `24_stream_events.py` | Typed stream events (`TextDelta`, `Done`, …) |
+| `25_cost_tracking.py` | Per-session `cost_usd` accumulation |
+| `26_token_preflight.py` | `session.estimated_tokens(content)` before send |
+| `27_stream_reconnect.py` | `chat.stream_with_reconnect(...)` |
+| `28_moonpalace.py` | `KimiClient.with_moonpalace()` local debugging |
 
 ## Development
 

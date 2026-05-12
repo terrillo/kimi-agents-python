@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from types import TracebackType
 from typing import Any, ClassVar
 
@@ -21,11 +22,13 @@ from .resources import (
     AsyncBatches,
     AsyncChat,
     AsyncFiles,
+    AsyncFormulas,
     AsyncModels,
     AsyncTokenizers,
     Batches,
     Chat,
     Files,
+    Formulas,
     Models,
     Tokenizers,
 )
@@ -50,6 +53,7 @@ class KimiClient:
     * ``client.models.list()`` — available models
     * ``client.tokenizers.estimate(...)`` — token-count estimate
     * ``client.account.balance()`` — billing balance
+    * ``client.formulas.tools/invoke/load`` — official Formula API tools
     """
 
     AVAILABLE_MODELS: ClassVar[tuple[Model, ...]] = AVAILABLE_MODELS
@@ -83,6 +87,7 @@ class KimiClient:
         self.models = Models(self)
         self.tokenizers = Tokenizers(self)
         self.account = Account(self)
+        self.formulas = Formulas(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         def _do() -> httpx.Response:
@@ -108,6 +113,32 @@ class KimiClient:
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+    @classmethod
+    def with_moonpalace(
+        cls,
+        *,
+        port: int = 9988,
+        host: str = "127.0.0.1",
+        trace_id: str | None = None,
+        api_key: str | None = None,
+        **kwargs: Any,
+    ) -> KimiClient:
+        """Build a client pointed at a local MoonPalace debugging proxy.
+
+        Sets ``base_url`` to ``http://{host}:{port}/v1`` and stamps a
+        per-client ``X-Msh-Trace-Id`` header (one UUID for the lifetime of the
+        client) so every request through this client is grouped under the same
+        trace id in ``moonpalace list``.
+
+        Start MoonPalace separately: ``moonpalace start --port 9988``.
+        """
+        client = cls(api_key=api_key, base_url=f"http://{host}:{port}/v1", **kwargs)
+        client._auth = {
+            **client._auth,
+            "X-Msh-Trace-Id": trace_id or uuid.uuid4().hex,
+        }
+        return client
 
 
 class AsyncKimiClient:
@@ -147,6 +178,7 @@ class AsyncKimiClient:
         self.models = AsyncModels(self)
         self.tokenizers = AsyncTokenizers(self)
         self.account = AsyncAccount(self)
+        self.formulas = AsyncFormulas(self)
 
     async def _request(
         self, method: str, path: str, **kwargs: Any
@@ -174,6 +206,24 @@ class AsyncKimiClient:
         tb: TracebackType | None,
     ) -> None:
         await self.aclose()
+
+    @classmethod
+    def with_moonpalace(
+        cls,
+        *,
+        port: int = 9988,
+        host: str = "127.0.0.1",
+        trace_id: str | None = None,
+        api_key: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncKimiClient:
+        """Async counterpart to :meth:`KimiClient.with_moonpalace`."""
+        client = cls(api_key=api_key, base_url=f"http://{host}:{port}/v1", **kwargs)
+        client._auth = {
+            **client._auth,
+            "X-Msh-Trace-Id": trace_id or uuid.uuid4().hex,
+        }
+        return client
 
 
 __all__ = ["AsyncKimiClient", "KimiClient"]
