@@ -148,6 +148,7 @@ def _build_request_body(
         )
     spec = get_model_spec(model)
     if spec is not None:
+        extra = spec.apply_defaults(extra)
         spec.validate_params(extra)
     if default_cache_key is not None and "prompt_cache_key" not in extra:
         extra = {**extra, "prompt_cache_key": default_cache_key}

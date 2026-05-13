@@ -36,6 +36,16 @@ class ModelSpec:
     penalty_locked: bool = False
     max_tokens_min: int | None = None
 
+    def apply_defaults(self, params: dict) -> dict:
+        """Return ``params`` with model-required defaults filled in.
+
+        Currently the only default injected is ``max_tokens`` for thinking
+        models that share the reasoning + content token budget.
+        """
+        if self.max_tokens_min is not None and "max_tokens" not in params:
+            return {**params, "max_tokens": self.max_tokens_min}
+        return params
+
     def validate_params(self, params: dict) -> None:
         """Raise ValueError if any kwarg in ``params`` violates this model's rules.
 
