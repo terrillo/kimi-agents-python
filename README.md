@@ -1,5 +1,13 @@
 # kimi-agents-python
 
+![Python versions](https://img.shields.io/pypi/pyversions/kimi-agents-python)
+
+<!-- Monthly downloads -->
+![Downloads](https://img.shields.io/pypi/dm/kimi-agents-python)
+
+<!-- License -->
+![License](https://img.shields.io/pypi/l/kimi-agents-python)
+
 A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string.
 
 ## Install
