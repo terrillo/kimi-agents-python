@@ -1,6 +1,6 @@
 # kimi-agents-python
 
-A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string.
+A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`, `client.formulas`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string. A higher-level `Session` keeps multi-turn state (including `reasoning_content` echo for thinking models), and `KimiAgent` + `Runner` build on top for tool-using agents, handoffs, and parallel execution.
 
 ## Install
 
@@ -8,7 +8,7 @@ A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/doc
 uv add kimi-agents-python
 ```
 
-Requires Python 3.14+.
+Requires Python 3.12+.
 
 Configure your API key in one of three ways (checked in this order):
 
@@ -775,7 +775,7 @@ uv run python examples/01_basic_chat.py
 
 ```bash
 uv sync --all-groups               # install dev deps
-uv run pytest                      # 272+ tests, <1s
+uv run pytest                      # 269 tests, <1s
 uv run pytest --cov=kimi_agents_python --cov-report=term-missing
 ```
 
