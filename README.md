@@ -1,8 +1,5 @@
 # kimi-agents-python
 
-<<<<<<< HEAD
-A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`, `client.formulas`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string. A higher-level `Session` keeps multi-turn state (including `reasoning_content` echo for thinking models), and `KimiAgent` + `Runner` build on top for tool-using agents, handoffs, and parallel execution.
-=======
 ![Python versions](https://img.shields.io/pypi/pyversions/kimi-agents-python)
 
 <!-- Monthly downloads -->
@@ -11,8 +8,7 @@ A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/doc
 <!-- License -->
 ![License](https://img.shields.io/pypi/l/kimi-agents-python)
 
-A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string.
->>>>>>> main
+A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`, `client.formulas`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string. A higher-level `Session` keeps multi-turn state (including `reasoning_content` echo for thinking models), and `KimiAgent` + `Runner` build on top for tool-using agents, handoffs, and parallel execution.
 
 ## Install
 
