@@ -59,7 +59,7 @@ from ._retry import DEFAULT_RETRY, NO_RETRY, RetryConfig
 from ._stats import CacheStats, TokenStats
 from .session import AsyncSession, Session
 from .specs import MODEL_SPECS, ModelSpec, get_model_spec
-from .tools import KimiTool, LoopGuards, arun_tools, kimi_tool, run_tools
+from .tools import Compactor, KimiTool, LoopGuards, arun_tools, kimi_tool, run_tools
 from .resources.files import FileContent
 from .builtins import BuiltinTool, web_search
 from .events import (
@@ -190,6 +190,7 @@ __all__ = [
     "KimiPermissionError",
     "KimiRateLimitError",
     "KimiServerError",
+    "Compactor",
     "KimiTool",
     "KimiToolLoopError",
     "LoopGuards",

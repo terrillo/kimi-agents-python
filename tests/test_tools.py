@@ -23,6 +23,7 @@ from kimi_agents_python import (
     kimi_tool,
     run_tools,
 )
+from kimi_agents_python.tools import _arun_tools_inner, _run_tools_inner
 from tests.conftest import make_async_client, make_sync_client
 
 
@@ -941,3 +942,118 @@ def test_run_tools_read_only_streak_resets_on_mutating_call() -> None:
     assert result.choices[0].message.content == "done"
 
 
+
+
+# -- compactor hook ------------------------------------------------------------
+
+
+def _fetch_tool():
+    @kimi_tool
+    def fetch(url: str) -> str:
+        """Fetch a URL."""
+        return "HUGE_BODY_" + "x" * 5000
+
+    return fetch
+
+
+def _fetch_then_done_handler(calls: list[dict]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        if len(calls) == 1:
+            return httpx.Response(
+                200,
+                json=_completion_with(
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "fetch", "arguments": '{"url":"u"}'},
+                        }
+                    ],
+                    content=None,
+                ),
+            )
+        return httpx.Response(200, json=_completion_with(content="done"))
+
+    return handler
+
+
+def _drop_tool_bodies(convo: list[dict]) -> list[dict]:
+    """Compactor: stub out tool-result bodies, keep structure intact."""
+    out: list[dict] = []
+    for m in convo:
+        if m.get("role") == "tool":
+            out.append({**m, "content": "[elided]"})
+        else:
+            out.append(m)
+    return out
+
+
+def test_run_tools_compactor_rewrites_payload_but_keeps_full_transcript() -> None:
+    calls: list[dict] = []
+    seen: list[int] = []
+
+    def compactor(convo: list[dict]) -> list[dict]:
+        seen.append(len(convo))
+        return _drop_tool_bodies(convo)
+
+    with make_sync_client(_fetch_then_done_handler(calls)) as client:
+        response, transcript = _run_tools_inner(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[_fetch_tool()],
+            max_steps=5,
+            guards=None,
+            compactor=compactor,
+        )
+
+    # Called once per model turn, each time with the full running convo.
+    assert seen == [1, 3]
+    # The huge tool body was elided on the wire (second request).
+    sent_tool_msg = next(m for m in calls[1]["messages"] if m["role"] == "tool")
+    assert sent_tool_msg["content"] == "[elided]"
+    # But the returned transcript still holds the full, uncompacted body.
+    kept_tool_msg = next(m for m in transcript if m.get("role") == "tool")
+    assert kept_tool_msg["content"].startswith("HUGE_BODY_")
+    assert response.choices[0].message.content == "done"
+
+
+def test_run_tools_no_compactor_sends_full_transcript() -> None:
+    calls: list[dict] = []
+    with make_sync_client(_fetch_then_done_handler(calls)) as client:
+        run_tools(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[_fetch_tool()],
+        )
+    sent_tool_msg = next(m for m in calls[1]["messages"] if m["role"] == "tool")
+    assert sent_tool_msg["content"].startswith("HUGE_BODY_")
+
+
+async def test_arun_tools_compactor_rewrites_payload_but_keeps_full_transcript() -> None:
+    calls: list[dict] = []
+    seen: list[int] = []
+
+    def compactor(convo: list[dict]) -> list[dict]:
+        seen.append(len(convo))
+        return _drop_tool_bodies(convo)
+
+    async with make_async_client(_fetch_then_done_handler(calls)) as client:
+        response, transcript = await _arun_tools_inner(
+            client,
+            model=Model.KIMI_K2_0905_PREVIEW,
+            messages=[{"role": "user", "content": "?"}],
+            tools=[_fetch_tool()],
+            max_steps=5,
+            guards=None,
+            compactor=compactor,
+        )
+
+    assert seen == [1, 3]
+    sent_tool_msg = next(m for m in calls[1]["messages"] if m["role"] == "tool")
+    assert sent_tool_msg["content"] == "[elided]"
+    kept_tool_msg = next(m for m in transcript if m.get("role") == "tool")
+    assert kept_tool_msg["content"].startswith("HUGE_BODY_")
+    assert response.choices[0].message.content == "done"

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from ._enums import Model
 from ._stats import TokenStats
 from .exceptions import KimiError
-from .tools import LoopGuards, ToolLike
+from .tools import Compactor, LoopGuards, ToolLike
 
 if TYPE_CHECKING:
     from .types import Message
@@ -45,6 +45,7 @@ class KimiAgent:
     output_type: type | None = None  # reserved — Phase 2 structured output
     max_steps: int = 10
     guards: LoopGuards | None = None
+    compactor: Compactor | None = None
     model_settings: dict[str, Any] = field(default_factory=dict)
 
 

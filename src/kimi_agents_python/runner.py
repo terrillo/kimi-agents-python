@@ -71,6 +71,7 @@ class Runner:
                 tools=all_tools,
                 max_steps=agent.max_steps,
                 guards=agent.guards,
+                compactor=agent.compactor,
                 **chat_kwargs,
             )
             final_messages = _coerce_messages(transcript)

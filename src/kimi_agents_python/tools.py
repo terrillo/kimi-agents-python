@@ -288,6 +288,21 @@ def _tool_result_record(tc: Any, content: str) -> dict:
     }
 
 
+Compactor = Callable[[list[dict]], list[dict]]
+"""Optional per-turn transcript compactor for the tool loop.
+
+Called with the full running conversation (list of API-shaped message
+dicts) immediately before each ``chat._create`` and must return the message
+list to actually send. The loop keeps accumulating the *full* transcript
+internally (it is what the returned transcript / ``RunResult.messages``
+reflect); only the per-call payload is replaced by the compactor's output.
+The callable MUST be pure (not mutate its argument) and MUST return an
+API-valid message list (system first; every ``tool`` message still preceded
+by the assistant message carrying its ``tool_call_id``). ``None`` disables
+compaction — the full transcript is sent every turn, the prior behavior.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class LoopGuards:
     """Optional safety limits for :func:`run_tools` / :func:`arun_tools`.
@@ -379,6 +394,7 @@ def _run_tools_inner(
     tools: Sequence[ToolLike],
     max_steps: int,
     guards: LoopGuards | None,
+    compactor: Compactor | None = None,
     **chat_kwargs: Any,
 ) -> tuple[ChatCompletion, list[dict]]:
     """Drive the sync tool loop and return both the terminal response and
@@ -388,14 +404,18 @@ def _run_tools_inner(
     The terminal assistant message is appended to the transcript before
     returning, so callers like :class:`~kimi_agents_python.session.Session`
     can persist the complete conversation. ``reasoning_content`` is preserved
-    on every assistant turn via :func:`_assistant_record`.
+    on every assistant turn via :func:`_assistant_record`. The returned
+    transcript is always the full conversation; ``compactor``, when given,
+    only rewrites the per-turn payload sent to the model (see
+    :data:`Compactor`).
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     state = _LoopState(guards or LoopGuards())
     for _ in range(max_steps):
+        payload = compactor(convo) if compactor is not None else convo
         response = client.chat._create(
-            model=model, messages=convo, tools=list(tools), **chat_kwargs
+            model=model, messages=payload, tools=list(tools), **chat_kwargs
         )
         state.record_tokens(response.usage)
         msg = response.choices[0].message
@@ -423,6 +443,7 @@ def run_tools(
     tools: Sequence[ToolLike],
     max_steps: int = 5,
     guards: LoopGuards | None = None,
+    compactor: Compactor | None = None,
     **chat_kwargs: Any,
 ) -> ChatCompletion:
     """Drive the chat → tool_calls → result loop synchronously to completion.
@@ -431,7 +452,8 @@ def run_tools(
     Raises :class:`KimiToolLoopError` if ``max_steps`` is exhausted first;
     raises a subclass when an optional :class:`LoopGuards` limit is hit.
     ``can_parallel`` is recorded on each tool but has no effect in the sync
-    helper — call dispatch is always sequential.
+    helper — call dispatch is always sequential. ``compactor`` optionally
+    rewrites the per-turn payload sent to the model (see :data:`Compactor`).
     """
     response, _ = _run_tools_inner(
         client,
@@ -440,6 +462,7 @@ def run_tools(
         tools=tools,
         max_steps=max_steps,
         guards=guards,
+        compactor=compactor,
         **chat_kwargs,
     )
     return response
@@ -453,18 +476,22 @@ async def _arun_tools_inner(
     tools: Sequence[ToolLike],
     max_steps: int,
     guards: LoopGuards | None,
+    compactor: Compactor | None = None,
     **chat_kwargs: Any,
 ) -> tuple[ChatCompletion, list[dict]]:
     """Async counterpart to :func:`_run_tools_inner`. Same contract: returns
     ``(terminal_response, full_transcript)`` with the terminal assistant
-    message included in the transcript.
+    message included in the transcript. ``compactor``, when given, only
+    rewrites the per-turn payload sent to the model — the returned
+    transcript is always the full conversation (see :data:`Compactor`).
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     state = _LoopState(guards or LoopGuards())
     for _ in range(max_steps):
+        payload = compactor(convo) if compactor is not None else convo
         response = await client.chat._create(
-            model=model, messages=convo, tools=list(tools), **chat_kwargs
+            model=model, messages=payload, tools=list(tools), **chat_kwargs
         )
         state.record_tokens(response.usage)
         msg = response.choices[0].message
@@ -513,6 +540,7 @@ async def arun_tools(
     tools: Sequence[ToolLike],
     max_steps: int = 5,
     guards: LoopGuards | None = None,
+    compactor: Compactor | None = None,
     **chat_kwargs: Any,
 ) -> ChatCompletion:
     """Async equivalent of :func:`run_tools` with partitioned parallel dispatch.
@@ -535,6 +563,7 @@ async def arun_tools(
         tools=tools,
         max_steps=max_steps,
         guards=guards,
+        compactor=compactor,
         **chat_kwargs,
     )
     return response
