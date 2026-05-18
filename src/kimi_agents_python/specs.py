@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._enums import Model, ThinkingMode, ThinkingSupport, ToolChoice
+from ._enums import Model, ResponseFormatType, ThinkingMode, ThinkingSupport, ToolChoice
 from .exceptions import ThinkingIncompatibilityError
 
 
@@ -59,6 +59,7 @@ class ModelSpec:
         self._check_thinking(params)
         self._check_max_tokens(params)
         self._check_tool_choice_with_thinking(params)
+        self._check_response_format(params)
 
     def _check_locked(self, key: str, params: dict, locked: bool, default: float) -> None:
         if locked and key in params and params[key] != default:
@@ -106,6 +107,24 @@ class ModelSpec:
             raise ValueError(
                 f"{self.id.value}: requires max_tokens >= {self.max_tokens_min}; "
                 f"got {value}."
+            )
+
+    def _check_response_format(self, params: dict) -> None:
+        """Reject a ``json_schema`` response_format when the model can't honour it.
+
+        ``json_object`` mode is supported everywhere; only the strict
+        ``json_schema`` form (what :meth:`Chat.parse` emits) needs a capable
+        model. Catching it here surfaces a clear error before the wire instead
+        of a generic 400.
+        """
+        rf = params.get("response_format")
+        if not isinstance(rf, dict) or rf.get("type") != ResponseFormatType.JSON_SCHEMA.value:
+            return
+        if not self.supports_json_schema:
+            raise ValueError(
+                f"{self.id.value}: does not support response_format "
+                f"'json_schema'. Use response_format={{'type': 'json_object'}} "
+                f"and instruct the model to emit JSON instead."
             )
 
     def _check_thinking(self, params: dict) -> None:

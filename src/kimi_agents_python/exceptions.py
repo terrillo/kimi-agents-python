@@ -152,6 +152,24 @@ class UnexpectedOutputError(KimiServerError):
     """error.type = unexpected_output"""
 
 
+class StructuredParseError(KimiError):
+    """chat.parse() could not turn the response into the requested type.
+
+    Raised before the opaque pydantic/JSON decode error so the caller sees
+    *why*: the response was truncated (``finish_reason='length'`` — raise
+    ``max_tokens``), the content was empty (often a thinking model spending
+    its whole budget on reasoning — disable thinking or raise ``max_tokens``),
+    or the model returned text that isn't valid JSON for the schema.
+
+    The raw :class:`ChatCompletion` is attached as ``.completion`` and the
+    original decode error, when there is one, as ``.__cause__``.
+    """
+
+    def __init__(self, message: str, *, completion: object | None = None) -> None:
+        super().__init__(message)
+        self.completion = completion
+
+
 _STATUS_TO_EXC: dict[int, type[KimiAPIError]] = {
     400: KimiBadRequestError,
     401: KimiAuthenticationError,

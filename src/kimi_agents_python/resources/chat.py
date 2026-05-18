@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 import httpx
 from pydantic import BaseModel, TypeAdapter
 
-from .._enums import Model, Role
+from .._enums import FinishReason, Model, Role
 from .._http import parse_sse_line, raise_for_status
 from .._retry import retry_async, retry_sync
-from ..exceptions import ManualMultiTurnError
+from ..exceptions import ManualMultiTurnError, StructuredParseError
 from ..specs import get_model_spec
 from ..types import (
     ChatCompletion,
@@ -116,6 +116,40 @@ def _resolve_schema(
         name,
         lambda s: adapter.validate_python(json.loads(s)),
     )
+
+
+def _parse_completion(
+    completion: ChatCompletion, parser: Any
+) -> ParsedChatCompletion[Any]:
+    """Run ``parser`` over the completion's text, with actionable errors.
+
+    Replaces the opaque ``Invalid JSON: EOF`` pydantic raises when the model
+    output was truncated or empty with a message that says what to change.
+    """
+    choice = completion.choices[0]
+    content = choice.message.content
+    if choice.finish_reason == FinishReason.LENGTH:
+        raise StructuredParseError(
+            "chat.parse(): response hit max_tokens before the JSON was "
+            "complete, so it can't be parsed. Raise max_tokens and retry.",
+            completion=completion,
+        )
+    if not content or not content.strip():
+        raise StructuredParseError(
+            "chat.parse(): the model returned empty content. For "
+            "thinking-capable models the token budget may have been spent on "
+            "reasoning — disable thinking for this call or raise max_tokens.",
+            completion=completion,
+        )
+    try:
+        parsed = parser(content)
+    except Exception as e:  # noqa: BLE001 - re-raised with context below
+        raise StructuredParseError(
+            f"chat.parse(): model output is not valid JSON for the requested "
+            f"schema: {e}",
+            completion=completion,
+        ) from e
+    return ParsedChatCompletion(completion=completion, parsed=parsed)
 
 
 def _coerce_tool(t: Any) -> dict[str, Any]:
@@ -307,8 +341,7 @@ class Chat:
             model=model, messages=messages, response_format=rf, **params
         )
         assert isinstance(completion, ChatCompletion)
-        parsed = parser(completion.choices[0].message.content or "")
-        return ParsedChatCompletion(completion=completion, parsed=parsed)
+        return _parse_completion(completion, parser)
 
     def stream_events(
         self,
@@ -520,8 +553,7 @@ class AsyncChat:
             model=model, messages=messages, response_format=rf, **params
         )
         assert isinstance(completion, ChatCompletion)
-        parsed = parser(completion.choices[0].message.content or "")
-        return ParsedChatCompletion(completion=completion, parsed=parsed)
+        return _parse_completion(completion, parser)
 
     async def stream_events(
         self,

@@ -176,3 +176,47 @@ def test_thinking_incompatibility_is_a_value_error() -> None:
         )
 
 
+@pytest.mark.parametrize("model", list(Model))
+def test_every_model_accepts_json_schema_response_format(model: Model) -> None:
+    """Structured output (json_schema) is honoured by every known model.
+
+    All current families set ``supports_json_schema=True``; this pins that so
+    a regression that flips a family off is caught here, not at the wire.
+    """
+    spec = MODEL_SPECS[model]
+    assert spec.supports_json_schema is True
+    params: dict = {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "S", "schema": {"type": "object"}},
+        }
+    }
+    if spec.max_tokens_min is not None:
+        params["max_tokens"] = spec.max_tokens_min
+    spec.validate_params(params)  # must not raise
+
+
+def test_json_object_response_format_is_always_allowed() -> None:
+    """json_object mode needs no special capability — allowed even if a model
+    were to drop json_schema support."""
+    spec = ModelSpec(
+        id=Model.KIMI_K2_6, family="x", context_length=1, supports_json_schema=False
+    )
+    spec.validate_params({"response_format": {"type": "json_object"}})
+
+
+def test_json_schema_rejected_when_model_lacks_support() -> None:
+    spec = ModelSpec(
+        id=Model.KIMI_K2_6, family="x", context_length=1, supports_json_schema=False
+    )
+    with pytest.raises(ValueError, match="does not support response_format"):
+        spec.validate_params(
+            {
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "S", "schema": {}},
+                }
+            }
+        )
+
+

@@ -46,6 +46,8 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 | **30** | **[`30_agent_tools.py`](30_agent_tools.py)** | **`KimiAgent` with `@kimi_tool` functions, parallel dispatch, `LoopGuards`** |
 | **31** | **[`31_agent_handoffs.py`](31_agent_handoffs.py)** | **Multi-agent handoffs — orchestrator delegates to specialist sub-agents** |
 | **32** | **[`32_agent_parallel.py`](32_agent_parallel.py)** | **`Runner.run_parallel()` — concurrent agents, shared `RunContext`, cost aggregation** |
+| **33** | **[`33_agent_compaction.py`](33_agent_compaction.py)** | **`KimiAgent.compactor` — shrink the per-turn payload, keep the full transcript** |
+| 34 | [`34_structured_parse_errors.py`](34_structured_parse_errors.py) | `chat.parse()` with `StructuredParseError` handling for truncated output |
 
 ## Notes
 

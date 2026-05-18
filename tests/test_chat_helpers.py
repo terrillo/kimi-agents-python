@@ -6,7 +6,13 @@ import httpx
 import pytest
 from pydantic import BaseModel, TypeAdapter
 
-from kimi_agents_python import Model, ParsedChatCompletion, PrefilledCompletion
+from kimi_agents_python import (
+    AVAILABLE_MODELS,
+    Model,
+    ParsedChatCompletion,
+    PrefilledCompletion,
+    StructuredParseError,
+)
 
 from .conftest import completion_body, make_async_client, make_sync_client
 
@@ -100,6 +106,118 @@ async def test_async_chat_prefill_and_parse() -> None:
         response_format=_V,
     )
     assert parsed.parsed.v == 1
+
+
+@pytest.mark.parametrize("model", list(AVAILABLE_MODELS))
+def test_chat_parse_structured_output_works_for_every_model(model: Model) -> None:
+    """chat.parse() builds a strict json_schema request and returns a typed
+    value for every model the client ships — including thinking models, whose
+    required max_tokens default is auto-injected."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content.decode()))
+        return httpx.Response(
+            200, json=completion_body('{"title": "GC", "bullets": ["a", "b"]}')
+        )
+
+    client = make_sync_client(handler)
+    result = client.chat.parse(
+        model=model,
+        messages=[{"role": "user", "content": "summarize"}],
+        response_format=_Summary,
+    )
+    assert isinstance(result, ParsedChatCompletion)
+    assert result.parsed == _Summary(title="GC", bullets=["a", "b"])
+    rf = captured["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["strict"] is True
+    assert "title" in rf["json_schema"]["schema"]["properties"]
+
+
+@pytest.mark.parametrize("model", list(AVAILABLE_MODELS))
+async def test_async_chat_parse_structured_output_works_for_every_model(
+    model: Model,
+) -> None:
+    """Async counterpart to the per-model structured-output verification."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=completion_body('{"title": "GC", "bullets": ["x"]}')
+        )
+
+    client = make_async_client(handler)
+    result = await client.chat.parse(
+        model=model,
+        messages=[{"role": "user", "content": "summarize"}],
+        response_format=_Summary,
+    )
+    assert result.parsed == _Summary(title="GC", bullets=["x"])
+
+
+def test_chat_parse_truncated_output_raises_clear_error() -> None:
+    """finish_reason='length' must surface as an actionable error, not an
+    opaque pydantic 'Invalid JSON: EOF'."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=completion_body('{"title": "GC", "bul', "length")
+        )
+
+    client = make_sync_client(handler)
+    with pytest.raises(StructuredParseError, match="max_tokens"):
+        client.chat.parse(
+            model=Model.KIMI_K2_6,
+            messages=[{"role": "user", "content": "summarize"}],
+            response_format=_Summary,
+        )
+
+
+def test_chat_parse_empty_content_raises_clear_error() -> None:
+    """Empty content (e.g. budget spent on reasoning) → clear error."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion_body("   "))
+
+    client = make_sync_client(handler)
+    with pytest.raises(StructuredParseError, match="empty content"):
+        client.chat.parse(
+            model=Model.KIMI_K2_6,
+            messages=[{"role": "user", "content": "summarize"}],
+            response_format=_Summary,
+        )
+
+
+def test_chat_parse_invalid_json_wraps_decode_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion_body("not json at all"))
+
+    client = make_sync_client(handler)
+    with pytest.raises(StructuredParseError, match="not valid JSON") as exc:
+        client.chat.parse(
+            model=Model.KIMI_K2_6,
+            messages=[{"role": "user", "content": "summarize"}],
+            response_format=_Summary,
+        )
+    assert exc.value.completion is not None
+    assert exc.value.__cause__ is not None
+
+
+async def test_async_chat_parse_truncated_output_raises_clear_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion_body('{"v": 1', "length"))
+
+    client = make_async_client(handler)
+
+    class _V(BaseModel):
+        v: int
+
+    with pytest.raises(StructuredParseError, match="max_tokens"):
+        await client.chat.parse(
+            model=Model.KIMI_K2_6,
+            messages=[{"role": "user", "content": "go"}],
+            response_format=_V,
+        )
 
 
 def test_chat_prefill_validates_disallowed_param() -> None:

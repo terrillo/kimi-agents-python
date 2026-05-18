@@ -57,7 +57,7 @@ def sse_response(chunks: list[dict | str]) -> httpx.Response:
     )
 
 
-def completion_body(content: str = "hello") -> dict:
+def completion_body(content: str = "hello", finish_reason: str = "stop") -> dict:
     return {
         "id": "cmpl-1",
         "object": "chat.completion",
@@ -67,7 +67,7 @@ def completion_body(content: str = "hello") -> dict:
             {
                 "index": 0,
                 "message": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
+                "finish_reason": finish_reason,
             }
         ],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},

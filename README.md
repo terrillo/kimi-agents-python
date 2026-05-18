@@ -451,6 +451,26 @@ def write_file(path: str, body: str) -> str:
 
 Catch the base `KimiToolLoopError` to handle every termination reason uniformly, or the specific subclass to react differently (e.g. retry with a smaller budget vs. nudge the model with a hint).
 
+### Transcript compaction (`compactor`)
+
+Long tool loops re-send the entire growing transcript on every turn, so a few large tool results (fetched documents, API dumps, file contents) make later turns increasingly expensive. Pass a `compactor` to `run_tools` / `arun_tools` — or set `KimiAgent.compactor` — to rewrite just the **per-turn payload** sent to the model. The loop keeps accumulating the *full* transcript internally, so `result.choices[...]` / `RunResult.messages` stay complete; only the wire payload shrinks.
+
+```python
+from kimi_agents_python import run_tools
+
+def elide_old_tool_results(convo: list[dict]) -> list[dict]:
+    """Keep only the most recent tool result in full; collapse earlier ones."""
+    last = max((i for i, m in enumerate(convo) if m.get("role") == "tool"), default=-1)
+    return [
+        {**m, "content": "[elided]"} if m.get("role") == "tool" and i != last else m
+        for i, m in enumerate(convo)
+    ]
+
+run_tools(client, model=..., messages=..., tools=[...], compactor=elide_old_tool_results)
+```
+
+The callable runs immediately before each `chat._create`. It **must** be pure (do not mutate its argument) and return an API-valid message list — system message first, and every `tool` message still preceded by the assistant message carrying its `tool_call_id`. Returning the list unchanged (or passing `compactor=None`, the default) sends the full transcript every turn, the prior behavior. See [`examples/33_agent_compaction.py`](examples/33_agent_compaction.py).
+
 ## Structured output (JSON schema)
 
 ```python
@@ -475,6 +495,11 @@ response = client.chat.create(
 ```
 
 `response_format={"type": "json_object"}` is also accepted for unconstrained JSON.
+
+`json_schema` works across every model the client ships (kimi-k2, k2.5, k2.6, k2-thinking, moonshot-v1, and the vision previews — verified live). Two practical notes the client now guards for you:
+
+- Note the schema is a *soft* constraint on these models — they may still emit extra keys or verbose JSON, so give `max_tokens` real headroom. `chat.parse()` raises a clear `StructuredParseError` (instead of an opaque JSON decode error) when the response was truncated at `max_tokens`, came back empty, or isn't valid JSON for the schema.
+- On thinking-capable models a small `max_tokens` is spent on reasoning and `content` comes back empty — disable thinking for the `parse()` call or raise `max_tokens`. Always-on thinking models (`kimi-k2-thinking*`) get their required large `max_tokens` injected automatically.
 
 ## Partial mode
 
