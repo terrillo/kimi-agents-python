@@ -64,7 +64,9 @@ class Runner:
         chat_kwargs = dict(agent.model_settings)
 
         if all_tools:
-            response, transcript = await _arun_tools_inner(
+            # usage is summed across every turn of the tool loop, not just
+            # the terminal response (see _arun_tools_inner).
+            response, transcript, usage = await _arun_tools_inner(
                 client,
                 model=agent.model,
                 messages=messages,
@@ -83,9 +85,8 @@ class Runner:
             msg = response.choices[0].message
             final_messages = messages + [_message_from_assistant(msg)]
             final_output = msg.content or ""
-
-        usage = TokenStats()
-        usage.record(response.usage, model=agent.model)
+            usage = TokenStats()
+            usage.record(response.usage, model=agent.model)
 
         return RunResult(
             final_output=final_output,

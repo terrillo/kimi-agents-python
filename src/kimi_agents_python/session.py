@@ -178,7 +178,7 @@ class Session(_BaseSession):
         self._append_user(content)
         kwargs = self._merge_kwargs(overrides)
         if tools:
-            response, transcript = _run_tools_inner(
+            response, transcript, _ = _run_tools_inner(
                 self._client,
                 model=self._model,
                 messages=self._messages,
@@ -301,7 +301,7 @@ class AsyncSession(_BaseSession):
         self._append_user(content)
         kwargs = self._merge_kwargs(overrides)
         if tools:
-            response, transcript = await _arun_tools_inner(
+            response, transcript, _ = await _arun_tools_inner(
                 self._client,
                 model=self._model,
                 messages=self._messages,

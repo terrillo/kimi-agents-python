@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol, get_type_hints, overload, runti
 from pydantic import BaseModel, create_model
 from pydantic.fields import FieldInfo
 
+from ._stats import TokenStats
 from .exceptions import (
     KimiToolLoopError,
     ReadOnlyStreakExceededError,
@@ -396,10 +397,11 @@ def _run_tools_inner(
     guards: LoopGuards | None,
     compactor: Compactor | None = None,
     **chat_kwargs: Any,
-) -> tuple[ChatCompletion, list[dict]]:
-    """Drive the sync tool loop and return both the terminal response and
-    the full assembled transcript (user + assistant + tool messages, all
-    dict-shaped per the API payload form).
+) -> tuple[ChatCompletion, list[dict], TokenStats]:
+    """Drive the sync tool loop and return the terminal response, the full
+    assembled transcript (user + assistant + tool messages, all dict-shaped
+    per the API payload form), and cumulative token usage summed across
+    every turn of the loop (not just the terminal turn).
 
     The terminal assistant message is appended to the transcript before
     returning, so callers like :class:`~kimi_agents_python.session.Session`
@@ -412,16 +414,18 @@ def _run_tools_inner(
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     state = _LoopState(guards or LoopGuards())
+    usage_total = TokenStats()
     for _ in range(max_steps):
         payload = compactor(convo) if compactor is not None else convo
         response = client.chat._create(
             model=model, messages=payload, tools=list(tools), **chat_kwargs
         )
         state.record_tokens(response.usage)
+        usage_total.record(response.usage, model=model)
         msg = response.choices[0].message
         if not msg.tool_calls:
             convo.append(_assistant_record(msg))
-            return response, convo
+            return response, convo, usage_total
         convo.append(_assistant_record(msg))
         for tc in msg.tool_calls:
             tool = registry.get(tc.function.name)
@@ -455,7 +459,7 @@ def run_tools(
     helper — call dispatch is always sequential. ``compactor`` optionally
     rewrites the per-turn payload sent to the model (see :data:`Compactor`).
     """
-    response, _ = _run_tools_inner(
+    response, _, _ = _run_tools_inner(
         client,
         model=model,
         messages=messages,
@@ -478,26 +482,29 @@ async def _arun_tools_inner(
     guards: LoopGuards | None,
     compactor: Compactor | None = None,
     **chat_kwargs: Any,
-) -> tuple[ChatCompletion, list[dict]]:
+) -> tuple[ChatCompletion, list[dict], TokenStats]:
     """Async counterpart to :func:`_run_tools_inner`. Same contract: returns
-    ``(terminal_response, full_transcript)`` with the terminal assistant
-    message included in the transcript. ``compactor``, when given, only
-    rewrites the per-turn payload sent to the model — the returned
-    transcript is always the full conversation (see :data:`Compactor`).
+    ``(terminal_response, full_transcript, cumulative_usage)`` with the
+    terminal assistant message included in the transcript and usage summed
+    across every turn. ``compactor``, when given, only rewrites the per-turn
+    payload sent to the model — the returned transcript is always the full
+    conversation (see :data:`Compactor`).
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     state = _LoopState(guards or LoopGuards())
+    usage_total = TokenStats()
     for _ in range(max_steps):
         payload = compactor(convo) if compactor is not None else convo
         response = await client.chat._create(
             model=model, messages=payload, tools=list(tools), **chat_kwargs
         )
         state.record_tokens(response.usage)
+        usage_total.record(response.usage, model=model)
         msg = response.choices[0].message
         if not msg.tool_calls:
             convo.append(_assistant_record(msg))
-            return response, convo
+            return response, convo, usage_total
         convo.append(_assistant_record(msg))
 
         resolved = [(tc, registry.get(tc.function.name)) for tc in msg.tool_calls]
@@ -556,7 +563,7 @@ async def arun_tools(
     order, before any dispatch — so a guard can short-circuit a parallel
     batch before it kicks off.
     """
-    response, _ = await _arun_tools_inner(
+    response, _, _ = await _arun_tools_inner(
         client,
         model=model,
         messages=messages,
