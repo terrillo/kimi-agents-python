@@ -13,6 +13,12 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
+[project.optional-dependencies]
+# `pip install kimi-agents-python[http2]` enables HTTP/2 multiplexing in
+# the default client. The client auto-detects `h2` and turns HTTP/2 on
+# when it's importable; the flag can be forced via `http2=` on the client.
+http2 = ["h2>=4.1"]
+
 [project.scripts]
 kimi-agents-python = "kimi_agents_python:main"
 

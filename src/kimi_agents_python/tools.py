@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import json
 from collections import deque
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, get_type_hints, overload, runtime_checkable
 
@@ -512,20 +512,28 @@ async def _arun_tools_inner(
             state.record_call(t, tc)
         results: list[str | None] = [None] * len(resolved)
 
-        parallel_indices: list[int] = []
-        parallel_coros: list[Awaitable[str]] = []
+        # ``KimiTool.ainvoke`` normally rewrites tool exceptions via
+        # ``failure_error_function``; the TaskGroup only ever fires for
+        # tools that opted out, which is the case we want to bail on.
+        parallel: list[tuple[int, ToolLike, Any]] = []
         serial_indices: list[int] = []
         for idx, (tc, t) in enumerate(resolved):
             if t is not None and t.can_parallel:
-                parallel_indices.append(idx)
-                parallel_coros.append(t.ainvoke(tc.function.arguments))
+                parallel.append((idx, t, tc))
             else:
                 serial_indices.append(idx)
 
-        if parallel_coros:
-            batch = await asyncio.gather(*parallel_coros)
-            for idx, content in zip(parallel_indices, batch):
-                results[idx] = content
+        if parallel:
+            async with asyncio.TaskGroup() as tg:
+                parallel_tasks = [
+                    tg.create_task(
+                        t.ainvoke(tc.function.arguments),
+                        name=f"tool:{t.name}",
+                    )
+                    for _, t, tc in parallel
+                ]
+            for (idx, _, _), task in zip(parallel, parallel_tasks):
+                results[idx] = task.result()
 
         for idx in serial_indices:
             tc, t = resolved[idx]

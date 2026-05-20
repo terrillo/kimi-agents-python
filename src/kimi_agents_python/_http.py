@@ -85,11 +85,13 @@ def parse_retry_after(value: str | None) -> float | None:
 
 
 def parse_sse_line(line: str) -> dict[str, Any] | None:
-    """Return parsed JSON dict for a `data: {...}` line, None for terminator/other."""
-    if not line or not line.startswith("data:"):
-        return None
-    payload = line[5:].strip()
-    if not payload or payload == _SSE_DONE:
+    """Return parsed JSON dict for a `data: {...}` line, None otherwise.
+
+    Streaming hot paths should call :func:`sse_payload` and feed the
+    payload directly to ``Model.model_validate_json``.
+    """
+    payload = sse_payload(line)
+    if payload is None:
         return None
     try:
         return json.loads(payload)
@@ -100,3 +102,19 @@ def parse_sse_line(line: str) -> dict[str, Any] | None:
             error_type="invalid_stream_chunk",
             raw=payload,
         ) from e
+
+
+def sse_payload(line: str) -> str | None:
+    """Return the raw JSON payload for a ``data: {...}`` SSE line.
+
+    Returns ``None`` for empty lines, the ``[DONE]`` sentinel, and any other
+    SSE field (``event:``, ``id:``, comments). The caller is responsible for
+    decoding the payload — pass it to ``Model.model_validate_json`` for the
+    fast path or to ``json.loads`` for a generic ``dict``.
+    """
+    if not line or not line.startswith("data:"):
+        return None
+    payload = line[5:].strip()
+    if not payload or payload == _SSE_DONE:
+        return None
+    return payload
