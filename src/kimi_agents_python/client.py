@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
 import uuid
+from functools import cache
 from types import TracebackType
 from typing import Any, ClassVar
 
@@ -32,6 +34,22 @@ from .resources import (
     Models,
     Tokenizers,
 )
+
+#: Default connection-pool limits; override via ``limits=httpx.Limits(...)``.
+DEFAULT_LIMITS = httpx.Limits(
+    max_connections=100,
+    max_keepalive_connections=20,
+    keepalive_expiry=30.0,
+)
+
+
+@cache
+def _h2_available() -> bool:
+    return importlib.util.find_spec("h2") is not None
+
+
+def _resolve_http2(http2: bool | None) -> bool:
+    return _h2_available() if http2 is None else http2
 
 
 def _resolve_retry(retries: int | RetryConfig | None) -> RetryConfig:
@@ -68,6 +86,8 @@ class KimiClient:
         http_client: httpx.Client | None = None,
         retries: int | RetryConfig | None = None,
         prompt_cache_key: str | None = None,
+        limits: httpx.Limits | None = None,
+        http2: bool | None = None,
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
@@ -76,6 +96,8 @@ class KimiClient:
         self._http = http_client or httpx.Client(
             base_url=self._base_url,
             timeout=timeout,
+            limits=limits or DEFAULT_LIMITS,
+            http2=_resolve_http2(http2),
         )
         self._retry = _resolve_retry(retries)
         self._prompt_cache_key = prompt_cache_key
@@ -163,6 +185,8 @@ class AsyncKimiClient:
         http_client: httpx.AsyncClient | None = None,
         retries: int | RetryConfig | None = None,
         prompt_cache_key: str | None = None,
+        limits: httpx.Limits | None = None,
+        http2: bool | None = None,
     ) -> None:
         self._api_key = resolve_api_key(api_key)
         self._base_url = base_url.rstrip("/")
@@ -171,6 +195,8 @@ class AsyncKimiClient:
         self._http = http_client or httpx.AsyncClient(
             base_url=self._base_url,
             timeout=timeout,
+            limits=limits or DEFAULT_LIMITS,
+            http2=_resolve_http2(http2),
         )
         self._retry = _resolve_retry(retries)
         self._prompt_cache_key = prompt_cache_key

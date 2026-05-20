@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, TypeAdapter
 
 from .._enums import FinishReason, Model, Role
-from .._http import parse_sse_line, raise_for_status
+from .._http import raise_for_status, sse_payload
 from .._retry import retry_async, retry_sync
 from ..exceptions import ManualMultiTurnError, StructuredParseError
 from ..specs import get_model_spec
@@ -26,6 +26,10 @@ from ..types import (
 
 if TYPE_CHECKING:
     from ..client import AsyncKimiClient, KimiClient
+
+
+# Reused per SSE chunk; ``validate_json`` parses the payload in Rust.
+_CHUNK_ADAPTER: TypeAdapter[ChatCompletionChunk] = TypeAdapter(ChatCompletionChunk)
 
 
 _MessageInput = Message | dict[str, Any]
@@ -285,10 +289,10 @@ class Chat:
         stack, response = retry_sync(self._client._retry, _open)
         with stack:
             for line in response.iter_lines():
-                chunk = parse_sse_line(line)
-                if chunk is None:
+                payload = sse_payload(line)
+                if payload is None:
                     continue
-                parsed = ChatCompletionChunk.model_validate(chunk)
+                parsed = _CHUNK_ADAPTER.validate_json(payload)
                 self._client.cache_stats.record(parsed.usage, model=model)
                 yield parsed
 
@@ -509,10 +513,10 @@ class AsyncChat:
         stack, response = await retry_async(self._client._retry, _open)
         async with stack:
             async for line in response.aiter_lines():
-                chunk = parse_sse_line(line)
-                if chunk is None:
+                payload = sse_payload(line)
+                if payload is None:
                     continue
-                parsed = ChatCompletionChunk.model_validate(chunk)
+                parsed = _CHUNK_ADAPTER.validate_json(payload)
                 self._client.cache_stats.record(parsed.usage, model=model)
                 yield parsed
 

@@ -121,13 +121,28 @@ class Runner:
         Returns results in the same order as ``runs``. A shared ``context``
         means a single ``context.cancel.set()`` call signals all agents.
         Each :class:`RunResult` carries independent usage and cost tracking.
+
+        Runs under :class:`asyncio.TaskGroup` so a failure in one agent
+        cancels siblings. The resulting ``BaseExceptionGroup`` is unwrapped
+        to its first leaf so ``except RunCancelledError:`` keeps working;
+        the full group is attached as ``__cause__``.
         """
         ctx = context or RunContext()
-        return list(
-            await asyncio.gather(
-                *[cls.run(agent, inp, client=client, context=ctx) for agent, inp in runs]
-            )
-        )
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tasks = [
+                    tg.create_task(
+                        cls.run(agent, inp, client=client, context=ctx),
+                        name=f"agent:{agent.name}",
+                    )
+                    for agent, inp in runs
+                ]
+        except BaseExceptionGroup as eg:
+            first: BaseException = eg
+            while isinstance(first, BaseExceptionGroup):
+                first = first.exceptions[0]
+            raise first from eg
+        return [task.result() for task in tasks]
 
     @classmethod
     def _build_handoff_tool(
