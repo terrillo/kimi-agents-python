@@ -1,6 +1,6 @@
 [project]
 name = "kimi-agents-python"
-version = "1.1.0"
+version = "1.2.0"
 description = "A typed Python client for the Kimi (Moonshot) API, built on httpx and pydantic"
 readme = "README.md"
 authors = [
