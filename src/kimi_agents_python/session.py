@@ -178,7 +178,7 @@ class Session(_BaseSession):
         self._append_user(content)
         kwargs = self._merge_kwargs(overrides)
         if tools:
-            response, transcript, _ = _run_tools_inner(
+            response, transcript, _, _ = _run_tools_inner(
                 self._client,
                 model=self._model,
                 messages=self._messages,
@@ -188,6 +188,7 @@ class Session(_BaseSession):
                 **kwargs,
             )
             self._messages = _coerce_messages(transcript)
+            assert response is not None
             self._record_usage(response.usage)
             return self._messages[-1]
         response = self._client.chat._create(
@@ -301,7 +302,7 @@ class AsyncSession(_BaseSession):
         self._append_user(content)
         kwargs = self._merge_kwargs(overrides)
         if tools:
-            response, transcript, _ = await _arun_tools_inner(
+            response, transcript, _, _ = await _arun_tools_inner(
                 self._client,
                 model=self._model,
                 messages=self._messages,
@@ -311,6 +312,7 @@ class AsyncSession(_BaseSession):
                 **kwargs,
             )
             self._messages = _coerce_messages(transcript)
+            assert response is not None
             self._record_usage(response.usage)
             return self._messages[-1]
         response = await self._client.chat._create(

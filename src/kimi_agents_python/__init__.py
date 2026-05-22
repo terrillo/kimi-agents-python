@@ -74,6 +74,7 @@ from .events import (
     stream_events,
 )
 from .agent import KimiAgent, RunCancelledError, RunContext, RunResult
+from .observers import RunObserver
 from .runner import Runner, handoff
 from .formulas import AsyncFormulaTool, FormulaTool
 from .pricing import MODEL_PRICING, WEB_SEARCH_CALL_USD, ModelPricing, usage_to_cost
@@ -130,6 +131,7 @@ __all__ = [
     "KimiAgent",
     "RunCancelledError",
     "RunContext",
+    "RunObserver",
     "RunResult",
     "Runner",
     "handoff",

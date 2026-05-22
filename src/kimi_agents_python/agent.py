@@ -47,17 +47,32 @@ class KimiAgent:
     guards: LoopGuards | None = None
     compactor: Compactor | None = None
     model_settings: dict[str, Any] = field(default_factory=dict)
+    graceful_caps: bool = False
+    """If ``True``, hitting ``max_steps`` or any :class:`LoopGuards` cap
+    returns a :class:`RunResult` with ``truncated=True`` and the partial
+    transcript instead of raising :class:`KimiToolLoopError`. Use for
+    bounded-by-design agents (a builder with a token budget, a planner
+    with a step cap) where partial output is the contract, not an error.
+    """
 
 
 @dataclass(slots=True)
 class RunResult:
-    """Outcome of a :meth:`Runner.run` call."""
+    """Outcome of a :meth:`Runner.run` call.
+
+    ``truncated`` is ``True`` when the agent had ``graceful_caps=True`` and
+    a cap fired — ``messages`` and ``usage`` reflect the partial state at
+    the trip point. ``final_output`` is the content of the last assistant
+    message, which may be empty when the cap fired before the model
+    produced any prose.
+    """
 
     final_output: str
     messages: list[Message]
     last_agent: KimiAgent
     usage: TokenStats
     cost_usd: Decimal
+    truncated: bool = False
 
 
 class RunCancelledError(KimiError):

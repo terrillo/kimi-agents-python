@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import time
 from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ from .exceptions import (
     RepeatedToolCallError,
     TokenBudgetExceededError,
 )
+from .observers import RunObserver, _HookSet, _call_async, _call_sync, _resolve_hooks
 from .types import FunctionDef, ToolDef
 
 if TYPE_CHECKING:
@@ -353,38 +355,75 @@ class _LoopState:
             maxlen=guards.repeat_threshold or 1
         )
 
-    def record_tokens(self, usage: Usage | None) -> None:
+    def check_tokens(self, usage: Usage | None) -> KimiToolLoopError | None:
+        """Update the cumulative token counter; return the cap exception or ``None``.
+
+        Returning the exception (instead of raising it) lets the inner loop
+        decide whether to ``raise`` it or break gracefully and attach the
+        accumulated transcript and ``TokenStats`` to it — which is what the
+        ``graceful_caps`` path does.
+        """
         if self.guards.max_tokens is None or usage is None:
-            return
+            return None
         self.total_tokens += usage.total_tokens
         if self.total_tokens > self.guards.max_tokens:
-            raise TokenBudgetExceededError(
+            return TokenBudgetExceededError(
                 f"Tool loop exceeded token budget: "
                 f"{self.total_tokens} > {self.guards.max_tokens}"
             )
+        return None
 
-    def record_call(self, tool: ToolLike | None, tc: Any) -> None:
+    def check_call(
+        self, tool: ToolLike | None, tc: Any
+    ) -> KimiToolLoopError | None:
+        """Record one tool-call attempt; return the cap exception or ``None``.
+
+        Same return-don't-raise contract as :meth:`check_tokens` so the inner
+        loop can choose between raising and graceful truncation.
+        """
         threshold = self.guards.repeat_threshold
         if threshold is not None:
             key = (tc.function.name, _normalize_args(tc.function.arguments))
             self._recent.append(key)
             if len(self._recent) == threshold and len(set(self._recent)) == 1:
-                raise RepeatedToolCallError(
+                return RepeatedToolCallError(
                     f"Tool '{tc.function.name}' called {threshold} times in a row "
                     f"with the same arguments"
                 )
         streak_limit = self.guards.read_only_streak
         if streak_limit is None or tool is None:
-            return
+            return None
         if tool.read_only:
             self.read_only_streak += 1
             if self.read_only_streak >= streak_limit:
-                raise ReadOnlyStreakExceededError(
+                return ReadOnlyStreakExceededError(
                     f"Tool loop made {self.read_only_streak} consecutive read-only "
                     f"calls (limit {streak_limit}) without a mutating call"
                 )
         else:
             self.read_only_streak = 0
+        return None
+
+
+def _trip(
+    exc: KimiToolLoopError,
+    *,
+    graceful_caps: bool,
+    convo: list[dict],
+    usage_total: TokenStats,
+) -> None:
+    """Either raise ``exc`` with partial loop state attached, or return cleanly.
+
+    Returning means the caller should break out of the loop and report
+    ``truncated=True``. The transcript snapshot (``list(convo)``) is only
+    paid when we actually raise — the graceful path discards ``exc``, so
+    decorating it would be wasted allocation.
+    """
+    if graceful_caps:
+        return
+    exc.usage_so_far = usage_total
+    exc.partial_transcript = list(convo)
+    raise exc
 
 
 def _run_tools_inner(
@@ -396,12 +435,14 @@ def _run_tools_inner(
     max_steps: int,
     guards: LoopGuards | None,
     compactor: Compactor | None = None,
+    observer: RunObserver | None = None,
+    graceful_caps: bool = False,
     **chat_kwargs: Any,
-) -> tuple[ChatCompletion, list[dict], TokenStats]:
+) -> tuple["ChatCompletion | None", list[dict], TokenStats, bool]:
     """Drive the sync tool loop and return the terminal response, the full
     assembled transcript (user + assistant + tool messages, all dict-shaped
-    per the API payload form), and cumulative token usage summed across
-    every turn of the loop (not just the terminal turn).
+    per the API payload form), cumulative token usage summed across every
+    turn of the loop, and a ``truncated`` flag.
 
     The terminal assistant message is appended to the transcript before
     returning, so callers like :class:`~kimi_agents_python.session.Session`
@@ -410,33 +451,97 @@ def _run_tools_inner(
     transcript is always the full conversation; ``compactor``, when given,
     only rewrites the per-turn payload sent to the model (see
     :data:`Compactor`).
+
+    When ``graceful_caps`` is ``True`` any :class:`LoopGuards` violation or
+    ``max_steps`` exhaustion breaks out of the loop and returns the partial
+    state with ``truncated=True`` instead of raising. The exception that
+    would have been raised — carrying ``usage_so_far`` and
+    ``partial_transcript`` — is discarded; callers wanting both partial
+    state *and* the trip reason should use ``graceful_caps=False`` and catch
+    :class:`KimiToolLoopError`.
+
+    ``observer``, when given, receives :class:`RunObserver` lifecycle
+    callbacks. Passing an observer with async hooks to this sync path
+    raises :class:`TypeError` rather than silently dropping events.
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     state = _LoopState(guards or LoopGuards())
     usage_total = TokenStats()
-    for _ in range(max_steps):
+    hooks = _resolve_hooks(observer)
+    tool_defs = list(tools)
+    last_response: ChatCompletion | None = None
+    for step in range(max_steps):
         payload = compactor(convo) if compactor is not None else convo
+        if hooks.on_compaction is not None and compactor is not None and len(payload) != len(convo):
+            _call_sync(hooks.on_compaction, step=step, before=len(convo), after=len(payload))
+        if hooks.on_turn_start is not None:
+            _call_sync(hooks.on_turn_start, step=step, messages=payload)
         response = client.chat._create(
-            model=model, messages=payload, tools=list(tools), **chat_kwargs
+            model=model, messages=payload, tools=tool_defs, **chat_kwargs
         )
-        state.record_tokens(response.usage)
+        last_response = response
+        # Record usage BEFORE the budget check so the exception (and the
+        # on_chat_response hook) see the turn that pushed us over.
         usage_total.record(response.usage, model=model)
+        if hooks.on_chat_response is not None:
+            _call_sync(
+                hooks.on_chat_response,
+                step=step,
+                response=response,
+                usage=response.usage,
+                usage_so_far=usage_total,
+            )
+        budget_exc = state.check_tokens(response.usage)
         msg = response.choices[0].message
-        if not msg.tool_calls:
-            convo.append(_assistant_record(msg))
-            return response, convo, usage_total
+        # Append the offending assistant turn before tripping the budget so
+        # ``partial_transcript`` includes the turn that pushed us over.
         convo.append(_assistant_record(msg))
+        if budget_exc is not None:
+            _trip(budget_exc, graceful_caps=graceful_caps, convo=convo, usage_total=usage_total)
+            return last_response, convo, usage_total, True
+        if not msg.tool_calls:
+            if hooks.on_step_complete is not None:
+                _call_sync(hooks.on_step_complete, step=step, usage_so_far=usage_total)
+            return response, convo, usage_total, False
         for tc in msg.tool_calls:
             tool = registry.get(tc.function.name)
-            state.record_call(tool, tc)
+            call_exc = state.check_call(tool, tc)
+            if call_exc is not None:
+                _trip(call_exc, graceful_caps=graceful_caps, convo=convo, usage_total=usage_total)
+                return last_response, convo, usage_total, True
+            args_str = tc.function.arguments
+            if hooks.on_tool_call_start is not None:
+                _call_sync(
+                    hooks.on_tool_call_start,
+                    step=step,
+                    call_id=getattr(tc, "id", "") or "",
+                    tool_name=tc.function.name,
+                    arguments=args_str,
+                )
+            t0 = time.perf_counter()
             content = (
-                tool.invoke(tc.function.arguments)
+                tool.invoke(args_str)
                 if tool is not None
                 else f"Unknown tool: {tc.function.name}"
             )
+            duration_ms = int((time.perf_counter() - t0) * 1000)
             convo.append(_tool_result_record(tc, content))
-    raise KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")
+            if hooks.on_tool_call_finished is not None:
+                _call_sync(
+                    hooks.on_tool_call_finished,
+                    step=step,
+                    call_id=getattr(tc, "id", "") or "",
+                    tool_name=tc.function.name,
+                    arguments=args_str,
+                    result=content,
+                    duration_ms=duration_ms,
+                )
+        if hooks.on_step_complete is not None:
+            _call_sync(hooks.on_step_complete, step=step, usage_so_far=usage_total)
+    step_exc = KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")
+    _trip(step_exc, graceful_caps=graceful_caps, convo=convo, usage_total=usage_total)
+    return last_response, convo, usage_total, True
 
 
 def run_tools(
@@ -448,18 +553,28 @@ def run_tools(
     max_steps: int = 5,
     guards: LoopGuards | None = None,
     compactor: Compactor | None = None,
+    observer: RunObserver | None = None,
     **chat_kwargs: Any,
 ) -> ChatCompletion:
     """Drive the chat → tool_calls → result loop synchronously to completion.
 
     Stops when the assistant returns a message with no ``tool_calls``.
     Raises :class:`KimiToolLoopError` if ``max_steps`` is exhausted first;
-    raises a subclass when an optional :class:`LoopGuards` limit is hit.
+    raises a subclass when an optional :class:`LoopGuards` limit is hit. The
+    raised exception carries ``usage_so_far`` and ``partial_transcript`` —
+    no need to back-fill from a client-wide counter on the except branch.
     ``can_parallel`` is recorded on each tool but has no effect in the sync
     helper — call dispatch is always sequential. ``compactor`` optionally
     rewrites the per-turn payload sent to the model (see :data:`Compactor`).
+    ``observer`` receives :class:`RunObserver` lifecycle callbacks.
+
+    Graceful truncation lives on :class:`Runner.run` (via
+    ``KimiAgent.graceful_caps``) because only ``RunResult`` carries the
+    ``truncated`` flag; direct callers of this helper should catch
+    :class:`KimiToolLoopError` and read ``exc.partial_transcript`` /
+    ``exc.usage_so_far``.
     """
-    response, _, _ = _run_tools_inner(
+    response, _, _, _ = _run_tools_inner(
         client,
         model=model,
         messages=messages,
@@ -467,8 +582,10 @@ def run_tools(
         max_steps=max_steps,
         guards=guards,
         compactor=compactor,
+        observer=observer,
         **chat_kwargs,
     )
+    assert response is not None
     return response
 
 
@@ -481,70 +598,125 @@ async def _arun_tools_inner(
     max_steps: int,
     guards: LoopGuards | None,
     compactor: Compactor | None = None,
+    observer: RunObserver | None = None,
+    graceful_caps: bool = False,
     **chat_kwargs: Any,
-) -> tuple[ChatCompletion, list[dict], TokenStats]:
+) -> tuple["ChatCompletion | None", list[dict], TokenStats, bool]:
     """Async counterpart to :func:`_run_tools_inner`. Same contract: returns
-    ``(terminal_response, full_transcript, cumulative_usage)`` with the
-    terminal assistant message included in the transcript and usage summed
-    across every turn. ``compactor``, when given, only rewrites the per-turn
-    payload sent to the model — the returned transcript is always the full
-    conversation (see :data:`Compactor`).
+    ``(terminal_response, full_transcript, cumulative_usage, truncated)``
+    with the terminal assistant message included in the transcript and
+    usage summed across every turn. ``compactor`` only rewrites the
+    per-turn payload sent to the model. ``observer``, ``graceful_caps``,
+    and the partial-state-on-exception behaviour mirror the sync inner
+    (see :func:`_run_tools_inner`); async observer hooks are awaited.
     """
     registry = {t.name: t for t in tools}
     convo = _serialise_messages(messages)
     state = _LoopState(guards or LoopGuards())
     usage_total = TokenStats()
-    for _ in range(max_steps):
+    hooks = _resolve_hooks(observer)
+    tool_defs = list(tools)
+    last_response: ChatCompletion | None = None
+    for step in range(max_steps):
         payload = compactor(convo) if compactor is not None else convo
+        if hooks.on_compaction is not None and compactor is not None and len(payload) != len(convo):
+            await _call_async(hooks.on_compaction, step=step, before=len(convo), after=len(payload))
+        if hooks.on_turn_start is not None:
+            await _call_async(hooks.on_turn_start, step=step, messages=payload)
         response = await client.chat._create(
-            model=model, messages=payload, tools=list(tools), **chat_kwargs
+            model=model, messages=payload, tools=tool_defs, **chat_kwargs
         )
-        state.record_tokens(response.usage)
+        last_response = response
         usage_total.record(response.usage, model=model)
+        if hooks.on_chat_response is not None:
+            await _call_async(
+                hooks.on_chat_response,
+                step=step,
+                response=response,
+                usage=response.usage,
+                usage_so_far=usage_total,
+            )
+        budget_exc = state.check_tokens(response.usage)
         msg = response.choices[0].message
-        if not msg.tool_calls:
-            convo.append(_assistant_record(msg))
-            return response, convo, usage_total
         convo.append(_assistant_record(msg))
+        if budget_exc is not None:
+            _trip(budget_exc, graceful_caps=graceful_caps, convo=convo, usage_total=usage_total)
+            return last_response, convo, usage_total, True
+        if not msg.tool_calls:
+            if hooks.on_step_complete is not None:
+                await _call_async(hooks.on_step_complete, step=step, usage_so_far=usage_total)
+            return response, convo, usage_total, False
 
         resolved = [(tc, registry.get(tc.function.name)) for tc in msg.tool_calls]
+        # Evaluate all per-call guards BEFORE dispatch so a trip aborts the
+        # whole batch and no tool side effects run for the offending turn.
         for tc, t in resolved:
-            state.record_call(t, tc)
+            call_exc = state.check_call(t, tc)
+            if call_exc is not None:
+                _trip(call_exc, graceful_caps=graceful_caps, convo=convo, usage_total=usage_total)
+                return last_response, convo, usage_total, True
         results: list[str | None] = [None] * len(resolved)
 
-        # ``KimiTool.ainvoke`` normally rewrites tool exceptions via
-        # ``failure_error_function``; the TaskGroup only ever fires for
-        # tools that opted out, which is the case we want to bail on.
-        parallel: list[tuple[int, ToolLike, Any]] = []
+        async def _invoke_with_hooks(idx: int, t: ToolLike | None, tc: Any) -> None:
+            call_id = getattr(tc, "id", "") or ""
+            args_str = tc.function.arguments
+            if hooks.on_tool_call_start is not None:
+                await _call_async(
+                    hooks.on_tool_call_start,
+                    step=step,
+                    call_id=call_id,
+                    tool_name=tc.function.name,
+                    arguments=args_str,
+                )
+            t0 = time.perf_counter()
+            if t is None:
+                content = f"Unknown tool: {tc.function.name}"
+            else:
+                content = await t.ainvoke(args_str)
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            results[idx] = content
+            if hooks.on_tool_call_finished is not None:
+                await _call_async(
+                    hooks.on_tool_call_finished,
+                    step=step,
+                    call_id=call_id,
+                    tool_name=tc.function.name,
+                    arguments=args_str,
+                    result=content,
+                    duration_ms=duration_ms,
+                )
+
+        parallel_indices: list[int] = []
         serial_indices: list[int] = []
         for idx, (tc, t) in enumerate(resolved):
             if t is not None and t.can_parallel:
-                parallel.append((idx, t, tc))
+                parallel_indices.append(idx)
             else:
                 serial_indices.append(idx)
 
-        if parallel:
+        # KimiTool.ainvoke rewrites tool exceptions via failure_error_function;
+        # the TaskGroup only ever fires for tools that opted out, which is the
+        # case we want to bail on.
+        if parallel_indices:
             async with asyncio.TaskGroup() as tg:
-                parallel_tasks = [
+                for idx in parallel_indices:
+                    tc, t = resolved[idx]
                     tg.create_task(
-                        t.ainvoke(tc.function.arguments),
-                        name=f"tool:{t.name}",
+                        _invoke_with_hooks(idx, t, tc),
+                        name=f"tool:{tc.function.name}",
                     )
-                    for _, t, tc in parallel
-                ]
-            for (idx, _, _), task in zip(parallel, parallel_tasks):
-                results[idx] = task.result()
 
         for idx in serial_indices:
             tc, t = resolved[idx]
-            if t is None:
-                results[idx] = f"Unknown tool: {tc.function.name}"
-            else:
-                results[idx] = await t.ainvoke(tc.function.arguments)
+            await _invoke_with_hooks(idx, t, tc)
 
         for (tc, _), content in zip(resolved, results):
             convo.append(_tool_result_record(tc, content or ""))
-    raise KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")
+        if hooks.on_step_complete is not None:
+            await _call_async(hooks.on_step_complete, step=step, usage_so_far=usage_total)
+    step_exc = KimiToolLoopError(f"Tool loop exceeded max_steps={max_steps}")
+    _trip(step_exc, graceful_caps=graceful_caps, convo=convo, usage_total=usage_total)
+    return last_response, convo, usage_total, True
 
 
 async def arun_tools(
@@ -556,22 +728,28 @@ async def arun_tools(
     max_steps: int = 5,
     guards: LoopGuards | None = None,
     compactor: Compactor | None = None,
+    observer: RunObserver | None = None,
     **chat_kwargs: Any,
 ) -> ChatCompletion:
     """Async equivalent of :func:`run_tools` with partitioned parallel dispatch.
 
     Each turn's ``tool_calls`` are split into two buckets: every call whose
     resolved tool has ``can_parallel=True`` is dispatched concurrently in a
-    single :func:`asyncio.gather`, then any remaining calls (``can_parallel=False``
-    tools and unknown tool names) run sequentially. Results are appended to the
-    transcript in the model's original ``tool_calls`` order regardless of
-    dispatch order, so subsequent turns see a deterministic conversation.
+    single :class:`asyncio.TaskGroup`, then any remaining calls
+    (``can_parallel=False`` tools and unknown tool names) run sequentially.
+    Results are appended to the transcript in the model's original
+    ``tool_calls`` order regardless of dispatch order, so subsequent turns
+    see a deterministic conversation.
 
     :class:`LoopGuards` checks are evaluated in the model's original call
     order, before any dispatch — so a guard can short-circuit a parallel
     batch before it kicks off.
+
+    ``observer`` mirrors :func:`run_tools`; async observer methods are
+    awaited inline. Graceful truncation lives on :class:`Runner.run`
+    only — see the note on :func:`run_tools`.
     """
-    response, _, _ = await _arun_tools_inner(
+    response, _, _, _ = await _arun_tools_inner(
         client,
         model=model,
         messages=messages,
@@ -579,6 +757,8 @@ async def arun_tools(
         max_steps=max_steps,
         guards=guards,
         compactor=compactor,
+        observer=observer,
         **chat_kwargs,
     )
+    assert response is not None
     return response

@@ -998,7 +998,7 @@ def test_run_tools_compactor_rewrites_payload_but_keeps_full_transcript() -> Non
         return _drop_tool_bodies(convo)
 
     with make_sync_client(_fetch_then_done_handler(calls)) as client:
-        response, transcript, _usage = _run_tools_inner(
+        response, transcript, _usage, _truncated = _run_tools_inner(
             client,
             model=Model.KIMI_K2_0905_PREVIEW,
             messages=[{"role": "user", "content": "?"}],
@@ -1041,7 +1041,7 @@ async def test_arun_tools_compactor_rewrites_payload_but_keeps_full_transcript()
         return _drop_tool_bodies(convo)
 
     async with make_async_client(_fetch_then_done_handler(calls)) as client:
-        response, transcript, _usage = await _arun_tools_inner(
+        response, transcript, _usage, _truncated = await _arun_tools_inner(
             client,
             model=Model.KIMI_K2_0905_PREVIEW,
             messages=[{"role": "user", "content": "?"}],

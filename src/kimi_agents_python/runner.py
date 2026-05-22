@@ -7,6 +7,7 @@ from ._enums import Role
 from ._stats import TokenStats
 from .agent import KimiAgent, RunCancelledError, RunContext, RunResult
 from .client import AsyncKimiClient
+from .observers import RunObserver
 from .session import _coerce_messages, _message_from_assistant
 from .tools import KimiTool, ToolLike, _arun_tools_inner
 from .types import Message
@@ -27,6 +28,7 @@ class Runner:
         *,
         client: AsyncKimiClient,
         context: RunContext | None = None,
+        observer: RunObserver | None = None,
     ) -> RunResult:
         """Run ``agent`` on ``prompt`` and return a :class:`RunResult`.
 
@@ -34,11 +36,20 @@ class Runner:
         can delegate via function calls. Raises :class:`RunCancelledError` if
         ``context.cancel`` is already set when the call begins.
 
+        ``observer``, when given, receives :class:`RunObserver` lifecycle
+        callbacks for every turn and every tool call. Async observer methods
+        are awaited inline; sync methods are called directly.
+
+        When ``agent.graceful_caps`` is ``True``, hitting ``max_steps`` or
+        any :class:`LoopGuards` limit returns a :class:`RunResult` with
+        ``truncated=True`` and the partial transcript instead of raising.
+
         .. note::
-            When tools are used, ``result.usage`` reflects only the final LLM
-            response (the turn that produced ``final_output``), not the sum of
-            all intermediate tool-call turns. This matches
-            :meth:`~kimi_agents_python.Session.send` behaviour.
+            When tools are used, ``result.usage`` reflects the cumulative
+            usage summed across every turn of the loop (not just the
+            terminal turn). This matches the partial-state attribute on
+            :class:`KimiToolLoopError` so the two paths report the same
+            number.
         """
         ctx = context or RunContext()
         if ctx.cancelled():
@@ -63,10 +74,9 @@ class Runner:
 
         chat_kwargs = dict(agent.model_settings)
 
+        truncated = False
         if all_tools:
-            # usage is summed across every turn of the tool loop, not just
-            # the terminal response (see _arun_tools_inner).
-            response, transcript, usage = await _arun_tools_inner(
+            _, transcript, usage, truncated = await _arun_tools_inner(
                 client,
                 model=agent.model,
                 messages=messages,
@@ -74,10 +84,17 @@ class Runner:
                 max_steps=agent.max_steps,
                 guards=agent.guards,
                 compactor=agent.compactor,
+                observer=observer,
+                graceful_caps=agent.graceful_caps,
                 **chat_kwargs,
             )
             final_messages = _coerce_messages(transcript)
-            final_output = response.choices[0].message.content or ""
+            # The inner always appends the last assistant turn before
+            # returning, so the transcript is the single source of truth
+            # for final_output — including the graceful-cap edge case.
+            final_output = ""
+            if final_messages and final_messages[-1].role == Role.ASSISTANT:
+                final_output = final_messages[-1].content or ""
         else:
             response = await client.chat._create(
                 model=agent.model, messages=messages, **chat_kwargs
@@ -94,6 +111,7 @@ class Runner:
             last_agent=agent,
             usage=usage,
             cost_usd=usage.cost_usd,
+            truncated=truncated,
         )
 
     @classmethod
@@ -104,9 +122,12 @@ class Runner:
         *,
         client: AsyncKimiClient,
         context: RunContext | None = None,
+        observer: RunObserver | None = None,
     ) -> RunResult:
         """Sync convenience wrapper around :meth:`run`. Do not call from inside an async context."""
-        return asyncio.run(cls.run(agent, prompt, client=client, context=context))
+        return asyncio.run(
+            cls.run(agent, prompt, client=client, context=context, observer=observer)
+        )
 
     @classmethod
     async def run_parallel(
@@ -115,12 +136,17 @@ class Runner:
         *,
         client: AsyncKimiClient,
         context: RunContext | None = None,
+        observer: RunObserver | None = None,
     ) -> list[RunResult]:
         """Run multiple ``(agent, prompt)`` pairs concurrently.
 
         Returns results in the same order as ``runs``. A shared ``context``
         means a single ``context.cancel.set()`` call signals all agents.
         Each :class:`RunResult` carries independent usage and cost tracking.
+        When ``observer`` is supplied, every sibling run shares the same
+        instance — implementations that record per-run state should keep
+        their own keying (e.g. by ``agent.name``) since hooks from different
+        runs interleave.
 
         Runs under :class:`asyncio.TaskGroup` so a failure in one agent
         cancels siblings. The resulting ``BaseExceptionGroup`` is unwrapped
@@ -132,7 +158,7 @@ class Runner:
             async with asyncio.TaskGroup() as tg:
                 tasks = [
                     tg.create_task(
-                        cls.run(agent, inp, client=client, context=ctx),
+                        cls.run(agent, inp, client=client, context=ctx, observer=observer),
                         name=f"agent:{agent.name}",
                     )
                     for agent, inp in runs

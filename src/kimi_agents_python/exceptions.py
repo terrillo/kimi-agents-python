@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._stats import TokenStats
+
 
 class KimiError(Exception):
     pass
@@ -14,7 +19,35 @@ class KimiToolLoopError(KimiError):
     * :class:`TokenBudgetExceededError` — cumulative usage over ``max_tokens``
     * :class:`ReadOnlyStreakExceededError` — too many consecutive read-only calls
     * :class:`RepeatedToolCallError` — same tool+args invoked N times in a row
+
+    The loop attaches its in-flight state to the exception so callers don't
+    have to back-fill spend from a client-wide counter on the except branch:
+
+    * :attr:`usage_so_far` — cumulative :class:`~kimi_agents_python.TokenStats`
+      summed across every turn that completed before the cap fired. Empty
+      when ``max_steps`` exhausts before any call is recorded.
+    * :attr:`partial_transcript` — the full message list as accumulated up to
+      the point of the abort, including the last assistant turn and any tool
+      results already produced. Same shape as ``RunResult.messages`` (API-form
+      dicts). Empty list when no state has been recorded yet.
     """
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        usage_so_far: "TokenStats | None" = None,
+        partial_transcript: list[dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        # Late import to avoid a cycle: ``_stats`` -> ``pricing`` -> nothing in
+        # this module, but the type stays under TYPE_CHECKING for clean docs.
+        if usage_so_far is None:
+            from ._stats import TokenStats
+
+            usage_so_far = TokenStats()
+        self.usage_so_far: TokenStats = usage_so_far
+        self.partial_transcript: list[dict[str, Any]] = partial_transcript or []
 
 
 class TokenBudgetExceededError(KimiToolLoopError):
