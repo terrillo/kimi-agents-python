@@ -217,4 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# macOS system files
+.DS_Store
+
+# Claude AI worktrees
+.claude
+
 .platform
