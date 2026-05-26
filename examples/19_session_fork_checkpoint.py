@@ -10,7 +10,7 @@ from kimi_agents_python import KimiClient, Model, Session
 with KimiClient() as client:
     sess = Session(
         client,
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         system="You are a brainstorming partner. One sentence per reply.",
     )
     sess.send("Suggest a name for a CLI tool that lints Markdown frontmatter.")

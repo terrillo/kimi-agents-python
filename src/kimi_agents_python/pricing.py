@@ -33,21 +33,6 @@ MODEL_PRICING: dict[Model, ModelPricing] = {
     Model.KIMI_K2_5: ModelPricing(
         Decimal("0.16"), Decimal("0.95"), Decimal("4.00")
     ),
-    Model.KIMI_K2_0905_PREVIEW: ModelPricing(
-        Decimal("0.15"), Decimal("0.60"), Decimal("2.50")
-    ),
-    Model.KIMI_K2_0711_PREVIEW: ModelPricing(
-        Decimal("0.15"), Decimal("0.60"), Decimal("2.50")
-    ),
-    Model.KIMI_K2_TURBO_PREVIEW: ModelPricing(
-        Decimal("0.15"), Decimal("1.15"), Decimal("8.00")
-    ),
-    Model.KIMI_K2_THINKING: ModelPricing(
-        Decimal("0.15"), Decimal("0.60"), Decimal("2.50")
-    ),
-    Model.KIMI_K2_THINKING_TURBO: ModelPricing(
-        Decimal("0.15"), Decimal("1.15"), Decimal("8.00")
-    ),
     Model.MOONSHOT_V1_8K: ModelPricing(
         Decimal("0.20"), Decimal("0.20"), Decimal("2.00")
     ),

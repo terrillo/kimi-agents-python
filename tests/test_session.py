@@ -121,7 +121,7 @@ def test_session_defaults_forwarded_to_chat_create() -> None:
     with make_sync_client(handler) as client:
         sess = Session(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             temperature=0.2,
             max_tokens=64,
             prompt_cache_key="key-A",
@@ -142,7 +142,7 @@ def test_send_overrides_session_defaults() -> None:
         return httpx.Response(200, json=_completion(content="ok"))
 
     with make_sync_client(handler) as client:
-        sess = Session(client, model=Model.KIMI_K2_0905_PREVIEW, temperature=0.2)
+        sess = Session(client, model=Model.MOONSHOT_V1_128K, temperature=0.2)
         sess.send("hi", temperature=0.9)
 
     assert captured[0]["temperature"] == 0.9
@@ -456,7 +456,7 @@ def test_chat_create_allows_partial_mode_prefill() -> None:
 
     with make_sync_client(handler) as client:
         client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[
                 {"role": "user", "content": "say hi"},
                 {"role": "assistant", "content": "[", "partial": True},

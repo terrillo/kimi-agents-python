@@ -5,7 +5,7 @@
 <!-- Monthly downloads -->
 ![Downloads](https://img.shields.io/pypi/dm/kimi-agents-python)
 
-A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`, `client.formulas`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — all 14 model IDs exposed as a `StrEnum` so you never have to remember the exact string. A higher-level `Session` keeps multi-turn state (including `reasoning_content` echo for thinking models), and `KimiAgent` + `Runner` build on top for tool-using agents, handoffs, and parallel execution.
+A typed Python client for the [Kimi (Moonshot) API](https://platform.kimi.ai/docs/api/overview), built on `httpx` and `pydantic`. Sync and async clients with namespaced resources (`client.chat`, `client.files`, `client.batches`, `client.models`, `client.tokenizers`, `client.account`, `client.formulas`), streaming, model-aware parameter validation, typed exceptions, auto-retry, and prompt-cache observability — every current model ID exposed as a `StrEnum` so you never have to remember the exact string. A higher-level `Session` keeps multi-turn state (including `reasoning_content` echo for thinking models), and `KimiAgent` + `Runner` build on top for tool-using agents, handoffs, and parallel execution.
 
 ## Install
 
@@ -78,13 +78,13 @@ The async client supports the same `stream=True` flow with `async for`.
 
 ## Models
 
-All 14 model IDs are exposed as a `StrEnum`:
+All current model IDs are exposed as a `StrEnum`:
 
 ```python
 from kimi_agents_python import Model, AVAILABLE_MODELS
 
 Model.KIMI_K2_6              # "kimi-k2.6"
-Model.KIMI_K2_THINKING       # "kimi-k2-thinking"
+Model.KIMI_K2_5              # "kimi-k2.5"
 Model.MOONSHOT_V1_128K       # "moonshot-v1-128k"
 
 for m in AVAILABLE_MODELS:
@@ -122,8 +122,6 @@ Unknown model strings bypass validation so the client stays usable when the serv
 | Family | Models | Notes |
 |---|---|---|
 | `kimi-k2.6` / `kimi-k2.5` | `kimi-k2.6`, `kimi-k2.5` | temp/top_p/n/penalties locked; `thinking` configurable; vision + video |
-| `kimi-k2` | `kimi-k2-0905-preview`, `kimi-k2-0711-preview`, `kimi-k2-turbo-preview` | flexible params; no thinking |
-| `kimi-k2-thinking` | `kimi-k2-thinking`, `kimi-k2-thinking-turbo` | always-on thinking; `temp=1.0` fixed; `max_tokens` ≥ 16000 required |
 | `moonshot-v1` | 8k / 32k / 128k / auto + `-vision-preview` variants | `temp=0.0` default; vision variants accept images |
 
 ## Thinking models
@@ -350,7 +348,7 @@ tools = [
 ]
 
 response = client.chat.create(
-    model=Model.KIMI_K2_0905_PREVIEW,
+    model=Model.KIMI_K2_6,
     messages=[{"role": "user", "content": "Weather in Tokyo?"}],
     tools=tools,
 )
@@ -380,7 +378,7 @@ def get_weather(
 with KimiClient() as client:
     result = run_tools(
         client,
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "Weather in Tokyo?"}],
         tools=[get_weather],
         max_steps=5,
@@ -388,7 +386,7 @@ with KimiClient() as client:
 print(result.choices[0].message.content)
 ```
 
-The auto-loop preserves `reasoning_content` across turns — required by `kimi-k2-thinking` per the [multi-step tool calls docs](https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#multi-step-tool-call). See [`examples/15_thinking_tools.py`](examples/15_thinking_tools.py).
+The auto-loop preserves `reasoning_content` across turns — required when `thinking={"type": "enabled", "keep": "all"}` is set on `kimi-k2.6`. See [`examples/15_thinking_tools.py`](examples/15_thinking_tools.py).
 
 ### Parallel tool dispatch (`can_parallel`)
 
@@ -482,7 +480,7 @@ schema = {
 }
 
 response = client.chat.create(
-    model=Model.KIMI_K2_0905_PREVIEW,
+    model=Model.KIMI_K2_6,
     messages=[{"role": "user", "content": "Summarize garbage collection."}],
     response_format={
         "type": "json_schema",
@@ -493,10 +491,10 @@ response = client.chat.create(
 
 `response_format={"type": "json_object"}` is also accepted for unconstrained JSON.
 
-`json_schema` works across every model the client ships (kimi-k2, k2.5, k2.6, k2-thinking, moonshot-v1, and the vision previews — verified live). Two practical notes the client now guards for you:
+`json_schema` works across every model the client ships (`kimi-k2.6`, `kimi-k2.5`, `moonshot-v1`, and the vision previews — verified live). Two practical notes the client now guards for you:
 
 - Note the schema is a *soft* constraint on these models — they may still emit extra keys or verbose JSON, so give `max_tokens` real headroom. `chat.parse()` raises a clear `StructuredParseError` (instead of an opaque JSON decode error) when the response was truncated at `max_tokens`, came back empty, or isn't valid JSON for the schema.
-- On thinking-capable models a small `max_tokens` is spent on reasoning and `content` comes back empty — disable thinking for the `parse()` call or raise `max_tokens`. Always-on thinking models (`kimi-k2-thinking*`) get their required large `max_tokens` injected automatically.
+- When `thinking={"type": "enabled"}` is set, a small `max_tokens` is spent on reasoning and `content` comes back empty — disable thinking for the `parse()` call or raise `max_tokens`.
 
 ## Partial mode
 
@@ -504,7 +502,7 @@ Prefill the assistant message to constrain the response shape. The API returns o
 
 ```python
 result = client.chat.prefill(
-    model=Model.KIMI_K2_0905_PREVIEW,
+    model=Model.KIMI_K2_6,
     messages=[{"role": "user", "content": "List three Python web frameworks as JSON."}],
     prefill="[",
 )
@@ -782,7 +780,7 @@ uv run python examples/01_basic_chat.py
 | `12_kimi_tool_decorator.py` | `@kimi_tool` + `run_tools` auto-loop |
 | `13_auto_retry.py` | `RetryConfig` for transient failures |
 | `14_prompt_caching.py` | `prompt_cache_key` + `cache_stats` |
-| `15_thinking_tools.py` | `kimi-k2-thinking` multi-step tool calls |
+| `15_thinking_tools.py` | thinking-enabled multi-step tool calls |
 | `16_files.py` | `client.files` upload / extract / delete |
 | `17_batches.py` | `client.batches` submit, poll, fetch results |
 | `18_session_basic.py` | `Session` multi-turn chat + per-session usage |

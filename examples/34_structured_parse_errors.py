@@ -20,7 +20,7 @@ class City(BaseModel):
 with KimiClient() as client:
     # 1. Happy path — typed value out.
     result = client.chat.parse(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "Structured data for Tokyo."}],
         response_format=City,
         max_tokens=256,
@@ -32,7 +32,7 @@ with KimiClient() as client:
     #    incomplete. The error says to raise max_tokens, not "Invalid JSON".
     try:
         client.chat.parse(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "Structured data for Tokyo."}],
             response_format=City,
             max_tokens=8,

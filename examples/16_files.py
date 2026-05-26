@@ -19,7 +19,7 @@ with KimiClient() as client:
 
     print("=== Use it in a chat ===")
     response = client.chat.create(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[
             {"role": "system", "content": body.text},
             {"role": "user", "content": "Summarize this file in one sentence."},

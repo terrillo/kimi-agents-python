@@ -18,7 +18,7 @@ with batch_path.open("w") as fh:
             "custom_id": f"req-{i}",
             "method": "POST",
             "url": "/v1/chat/completions",
-            "body": {"model": "kimi-k2-0905-preview", "messages": [msg]},
+            "body": {"model": "kimi-k2.6", "messages": [msg]},
         }
         fh.write(json.dumps(line) + "\n")
 

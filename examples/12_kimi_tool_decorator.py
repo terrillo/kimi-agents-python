@@ -30,7 +30,7 @@ def timezone_for(city: Annotated[str, Field(description="City name")]) -> str:
 with KimiClient() as client:
     response = run_tools(
         client,
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[
             {
                 "role": "user",

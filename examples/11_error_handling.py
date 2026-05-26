@@ -13,7 +13,7 @@ from kimi_agents_python import (
 with KimiClient(api_key="sk-not-a-real-key") as client:
     try:
         client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "hi"}],
         )
     except InvalidAuthenticationError as e:

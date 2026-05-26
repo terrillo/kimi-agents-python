@@ -8,7 +8,7 @@ PREFILL = "{"
 
 with KimiClient() as client:
     response = client.chat.create(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[
             {"role": "user", "content": "List three Python web frameworks."},
             {"role": "assistant", "content": PREFILL, "partial": True},

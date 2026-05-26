@@ -4,7 +4,7 @@ from kimi_agents_python import KimiClient, Model
 
 with KimiClient() as client:
     response = client.chat.create(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[
             {"role": "system", "content": "You are a concise coding assistant."},
             {"role": "user", "content": "Explain what __slots__ does in Python."},

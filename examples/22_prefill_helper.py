@@ -6,7 +6,7 @@ from kimi_agents_python import KimiClient, Model
 
 with KimiClient() as client:
     result = client.chat.prefill(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[
             {"role": "user", "content": "List three Python web frameworks as JSON."}
         ],

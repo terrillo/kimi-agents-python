@@ -189,40 +189,6 @@ MODEL_SPECS: dict[Model, ModelSpec] = {
     Model.KIMI_K2_5: ModelSpec(
         id=Model.KIMI_K2_5, **{**_K26_LOCKED, "family": "kimi-k2.5"}
     ),
-    Model.KIMI_K2_0905_PREVIEW: ModelSpec(
-        id=Model.KIMI_K2_0905_PREVIEW,
-        family="kimi-k2",
-        context_length=262_144,
-        temperature_default=0.6,
-    ),
-    Model.KIMI_K2_0711_PREVIEW: ModelSpec(
-        id=Model.KIMI_K2_0711_PREVIEW,
-        family="kimi-k2",
-        context_length=131_072,
-        temperature_default=0.6,
-    ),
-    Model.KIMI_K2_TURBO_PREVIEW: ModelSpec(
-        id=Model.KIMI_K2_TURBO_PREVIEW,
-        family="kimi-k2",
-        context_length=262_144,
-        temperature_default=0.6,
-    ),
-    Model.KIMI_K2_THINKING: ModelSpec(
-        id=Model.KIMI_K2_THINKING,
-        family="kimi-k2-thinking",
-        context_length=262_144,
-        thinking_support=ThinkingSupport.ALWAYS_ON,
-        temperature_default=1.0,
-        max_tokens_min=16_000,
-    ),
-    Model.KIMI_K2_THINKING_TURBO: ModelSpec(
-        id=Model.KIMI_K2_THINKING_TURBO,
-        family="kimi-k2-thinking",
-        context_length=262_144,
-        thinking_support=ThinkingSupport.ALWAYS_ON,
-        temperature_default=1.0,
-        max_tokens_min=16_000,
-    ),
     Model.MOONSHOT_V1_8K: ModelSpec(
         id=Model.MOONSHOT_V1_8K,
         family="moonshot-v1",

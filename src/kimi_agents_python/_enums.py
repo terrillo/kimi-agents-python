@@ -6,11 +6,6 @@ from enum import StrEnum
 class Model(StrEnum):
     KIMI_K2_6 = "kimi-k2.6"
     KIMI_K2_5 = "kimi-k2.5"
-    KIMI_K2_0905_PREVIEW = "kimi-k2-0905-preview"
-    KIMI_K2_0711_PREVIEW = "kimi-k2-0711-preview"
-    KIMI_K2_TURBO_PREVIEW = "kimi-k2-turbo-preview"
-    KIMI_K2_THINKING = "kimi-k2-thinking"
-    KIMI_K2_THINKING_TURBO = "kimi-k2-thinking-turbo"
     MOONSHOT_V1_8K = "moonshot-v1-8k"
     MOONSHOT_V1_32K = "moonshot-v1-32k"
     MOONSHOT_V1_128K = "moonshot-v1-128k"

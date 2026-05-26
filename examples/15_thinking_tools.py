@@ -1,4 +1,4 @@
-"""Multi-step tool calls with kimi-k2-thinking — `run_tools` preserves reasoning across turns."""
+"""Multi-step tool calls with thinking — `run_tools` preserves reasoning across turns."""
 
 from typing import Annotated, Literal
 
@@ -27,7 +27,7 @@ def get_time(
 with KimiClient() as client:
     result = run_tools(
         client,
-        model=Model.KIMI_K2_THINKING,
+        model=Model.KIMI_K2_6,
         messages=[
             {
                 "role": "user",
@@ -36,7 +36,7 @@ with KimiClient() as client:
             }
         ],
         tools=[get_weather, get_time],
-        max_tokens=16000,
+        thinking={"type": "enabled", "keep": "all"},
         max_steps=8,
     )
 

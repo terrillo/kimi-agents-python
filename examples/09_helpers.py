@@ -10,7 +10,7 @@ with KimiClient() as client:
 
     print("\n=== Token estimate ===")
     est = client.tokenizers.estimate(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "Hello, what can you do?"}],
     )
     print(f"  total tokens: {est.data.total_tokens}")
