@@ -28,7 +28,7 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 | 12 | [`12_kimi_tool_decorator.py`](12_kimi_tool_decorator.py) | `@kimi_tool` + `run_tools` auto-loop |
 | 13 | [`13_auto_retry.py`](13_auto_retry.py) | Default + custom `RetryConfig` for 429 / 5xx |
 | 14 | [`14_prompt_caching.py`](14_prompt_caching.py) | `prompt_cache_key` default + `cache_stats` |
-| 15 | [`15_thinking_tools.py`](15_thinking_tools.py) | `kimi-k2-thinking` multi-step tool calls (`run_tools` preserves `reasoning_content`) |
+| 15 | [`15_thinking_tools.py`](15_thinking_tools.py) | `kimi-k2.6` thinking-enabled multi-step tool calls (`run_tools` preserves `reasoning_content`) |
 | 16 | [`16_files.py`](16_files.py) | `client.files` upload, extract content, chat over it, delete |
 | 17 | [`17_batches.py`](17_batches.py) | `client.batches` create + poll + fetch JSONL results |
 | 18 | [`18_session_basic.py`](18_session_basic.py) | `Session` multi-turn chat — auto-echoes `reasoning_content`, tracks per-session usage |
@@ -51,7 +51,7 @@ Set `MOONSHOT_API_KEY` in your environment or `.env` at the repo root (see `.env
 
 ## Notes
 
-- The default model for most examples is `kimi-k2-0905-preview` because it accepts flexible parameters. `kimi-k2.6` is used where its features (thinking, vision) are the point. Agent examples use `kimi-k2.6` because it is the primary production model.
+- All examples use `kimi-k2.6` — the current production model. Its parameters (`temperature`, `top_p`, `n`, `presence_penalty`, `frequency_penalty`) are locked at the server-recommended defaults; `11_error_handling.py` demonstrates the client-side validation that surfaces this before the wire.
 - `06_vision.py` takes an image path argument: `uv run python examples/06_vision.py path/to/photo.png`.
 - `10_file_validation.py` is the only example that doesn't call the API — useful as a sanity-check before adding billing keys.
 - These scripts hit the live API and cost real tokens. Run `09_helpers.py` first to check your balance.

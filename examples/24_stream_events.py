@@ -11,8 +11,9 @@ from kimi_agents_python import (
 
 with KimiClient() as client:
     events = client.chat.stream_events(
-        model=Model.KIMI_K2_THINKING,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "Explain MoE in one sentence."}],
+        thinking={"type": "enabled", "keep": "all"},
         stream_options={"include_usage": True},
     )
     for ev in events:

@@ -7,7 +7,7 @@ from kimi_agents_python import KimiClient, Model, RetryConfig
 #    sends one. Nothing to configure for the common case.
 with KimiClient() as client:
     response = client.chat.create(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "ping"}],
     )
     print(response.choices[0].message.content[:80])
@@ -23,7 +23,7 @@ custom = RetryConfig(
 )
 with KimiClient(retries=custom) as client:
     response = client.chat.create(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "ping"}],
     )
     print(response.choices[0].message.content[:80])
@@ -31,7 +31,7 @@ with KimiClient(retries=custom) as client:
 # 3. Disable retries entirely (e.g., for tests that want raw errors).
 with KimiClient(retries=0) as client:
     response = client.chat.create(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "ping"}],
     )
     print(response.choices[0].message.content[:80])

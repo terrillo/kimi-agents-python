@@ -41,7 +41,7 @@ def test_chat_request_max_tokens_alias() -> None:
 def test_chat_request_thinking_and_tools() -> None:
     req = ChatCompletionRequest.model_validate(
         {
-            "model": "kimi-k2-thinking",
+            "model": "kimi-k2.6",
             "messages": [{"role": "user", "content": "x"}],
             "thinking": {"type": "enabled", "keep": "all"},
             "tools": [

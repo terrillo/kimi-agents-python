@@ -28,7 +28,7 @@ def test_chat_non_streaming_sends_correct_body() -> None:
 
     with make_sync_client(handler) as client:
         result = client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "ping"}],
             temperature=0.3,
             max_tokens=128,
@@ -36,7 +36,7 @@ def test_chat_non_streaming_sends_correct_body() -> None:
 
     assert isinstance(result, ChatCompletion)
     assert result.choices[0].message.content == "hi back"
-    assert captured["body"]["model"] == "kimi-k2-0905-preview"
+    assert captured["body"]["model"] == "moonshot-v1-128k"
     assert captured["body"]["temperature"] == 0.3
     assert captured["body"]["max_tokens"] == 128
     assert captured["body"]["messages"] == [{"role": "user", "content": "ping"}]
@@ -230,7 +230,7 @@ def test_chat_rejects_unknown_kwarg_before_send() -> None:
     with make_sync_client(handler) as client:
         with pytest.raises(TypeError, match="temperture"):
             client.chat.create(
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "x"}],
                 temperture=0.3,  # noqa  intentional typo
             )
@@ -262,7 +262,7 @@ def test_chat_accepts_max_tokens_alias() -> None:
 
     with make_sync_client(handler) as client:
         client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "x"}],
             max_tokens=128,
         )
@@ -279,7 +279,7 @@ def test_chat_accepts_tool_choice_required_end_to_end() -> None:
 
     with make_sync_client(handler) as client:
         client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "x"}],
             tool_choice="required",
             tools=[

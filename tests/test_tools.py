@@ -172,7 +172,7 @@ def test_request_body_to_kimi_omits_can_parallel() -> None:
 
     with make_sync_client(handler) as client:
         client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[fn],
         )
@@ -294,7 +294,7 @@ def _completion_with(
         "id": "c-1",
         "object": "chat.completion",
         "created": 1,
-        "model": "kimi-k2-0905-preview",
+        "model": "moonshot-v1-128k",
         "choices": [
             {"index": 0, "message": message, "finish_reason": "stop"}
         ],
@@ -316,7 +316,7 @@ def test_chat_accepts_kimi_tool_instance_in_tools_list() -> None:
 
     with make_sync_client(handler) as client:
         client.chat.create(
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[get_weather],
         )
@@ -363,7 +363,7 @@ def test_run_tools_dispatches_then_returns_final_answer() -> None:
     with make_sync_client(handler) as client:
         result = run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "Weather in Tokyo?"}],
             tools=[get_weather],
         )
@@ -413,7 +413,7 @@ def test_run_tools_unknown_tool_name_passes_placeholder() -> None:
     with make_sync_client(handler) as client:
         result = run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[get_weather],
         )
@@ -445,7 +445,7 @@ def test_run_tools_raises_when_max_steps_exhausted() -> None:
         with pytest.raises(KimiToolLoopError, match="max_steps=2"):
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[loopy],
                 max_steps=2,
@@ -505,7 +505,7 @@ async def test_arun_tools_parallel_dispatch_when_all_can_parallel() -> None:
     async with make_async_client(handler) as client:
         await arun_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[slow_a, slow_b],
         )
@@ -552,7 +552,7 @@ async def test_arun_tools_partitions_parallel_from_serial() -> None:
     async with make_async_client(handler) as client:
         await arun_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[slow_a, slow_b],
         )
@@ -614,7 +614,7 @@ async def test_arun_tools_three_tool_partition_proves_parallelism() -> None:
     async with make_async_client(handler) as client:
         await arun_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[p1, p2, s1],
         )
@@ -628,7 +628,7 @@ async def test_arun_tools_three_tool_partition_proves_parallelism() -> None:
 
 
 def test_run_tools_preserves_reasoning_content_across_turns() -> None:
-    """kimi-k2-thinking requires prior reasoning_content in the next request."""
+    """Thinking-enabled requests require prior reasoning_content in the next request."""
 
     @kimi_tool
     def echo(msg: str) -> str:
@@ -658,9 +658,10 @@ def test_run_tools_preserves_reasoning_content_across_turns() -> None:
     with make_sync_client(handler) as client:
         run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.KIMI_K2_6,
             messages=[{"role": "user", "content": "?"}],
             tools=[echo],
+            thinking={"type": "enabled", "keep": "all"},
         )
 
     assistant_msg = calls[1]["messages"][1]
@@ -700,7 +701,7 @@ def test_run_tools_omits_reasoning_content_when_none() -> None:
     with make_sync_client(handler) as client:
         run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[echo],
         )
@@ -743,7 +744,7 @@ def test_run_tools_token_budget_raises() -> None:
         with pytest.raises(TokenBudgetExceededError, match="500"):
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[echo],
                 max_steps=10,
@@ -772,7 +773,7 @@ def test_run_tools_token_budget_passes_under_limit() -> None:
     with make_sync_client(handler) as client:
         result = run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[echo],
             guards=LoopGuards(max_tokens=1000),
@@ -797,7 +798,7 @@ def test_run_tools_repeated_call_raises_after_threshold() -> None:
         with pytest.raises(RepeatedToolCallError, match="search"):
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[search],
                 max_steps=10,
@@ -831,7 +832,7 @@ def test_run_tools_repeat_threshold_resets_on_different_args() -> None:
     with make_sync_client(handler) as client:
         result = run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[search],
             max_steps=10,
@@ -863,7 +864,7 @@ def test_run_tools_repeat_threshold_normalizes_arg_whitespace() -> None:
         with pytest.raises(RepeatedToolCallError):
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[search],
                 max_steps=10,
@@ -894,7 +895,7 @@ def test_run_tools_read_only_streak_raises() -> None:
         with pytest.raises(ReadOnlyStreakExceededError, match="3 consecutive"):
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[search],
                 max_steps=10,
@@ -933,7 +934,7 @@ def test_run_tools_read_only_streak_resets_on_mutating_call() -> None:
     with make_sync_client(handler) as client:
         result = run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[search, write],
             max_steps=10,
@@ -1000,7 +1001,7 @@ def test_run_tools_compactor_rewrites_payload_but_keeps_full_transcript() -> Non
     with make_sync_client(_fetch_then_done_handler(calls)) as client:
         response, transcript, _usage, _truncated = _run_tools_inner(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[_fetch_tool()],
             max_steps=5,
@@ -1024,7 +1025,7 @@ def test_run_tools_no_compactor_sends_full_transcript() -> None:
     with make_sync_client(_fetch_then_done_handler(calls)) as client:
         run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[_fetch_tool()],
         )
@@ -1043,7 +1044,7 @@ async def test_arun_tools_compactor_rewrites_payload_but_keeps_full_transcript()
     async with make_async_client(_fetch_then_done_handler(calls)) as client:
         response, transcript, _usage, _truncated = await _arun_tools_inner(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[_fetch_tool()],
             max_steps=5,

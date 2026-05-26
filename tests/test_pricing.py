@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from kimi_agents_python import (
+    AVAILABLE_MODELS,
     CacheStats,
     MODEL_PRICING,
     Model,
@@ -12,14 +13,11 @@ from kimi_agents_python import (
 )
 
 
-def test_pricing_table_covers_active_models() -> None:
-    for m in (
-        Model.KIMI_K2_6,
-        Model.KIMI_K2_THINKING,
-        Model.KIMI_K2_TURBO_PREVIEW,
-        Model.MOONSHOT_V1_128K,
-    ):
-        assert m in MODEL_PRICING
+def test_pricing_table_covers_every_active_model() -> None:
+    """MOONSHOT_V1_AUTO routes to other models, so it has no fixed price."""
+    expected = set(AVAILABLE_MODELS) - {Model.MOONSHOT_V1_AUTO}
+    missing = expected - set(MODEL_PRICING)
+    assert missing == set(), f"Models missing from MODEL_PRICING: {missing}"
 
 
 def test_usage_to_cost_splits_cache_hit_and_miss() -> None:

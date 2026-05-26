@@ -12,7 +12,7 @@ class Summary(BaseModel):
 
 with KimiClient() as client:
     result = client.chat.parse(
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.KIMI_K2_6,
         messages=[{"role": "user", "content": "Summarize garbage collection."}],
         response_format=Summary,
     )

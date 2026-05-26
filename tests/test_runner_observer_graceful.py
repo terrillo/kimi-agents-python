@@ -62,7 +62,7 @@ def _completion(
         "id": "c-1",
         "object": "chat.completion",
         "created": 1,
-        "model": "kimi-k2-0905-preview",
+        "model": "moonshot-v1-128k",
         "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
         "usage": {
             "prompt_tokens": 1,
@@ -212,7 +212,7 @@ def test_observer_sync_loop_emits_full_lifecycle_in_order() -> None:
     with make_sync_client(handler) as client:
         run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[_echo_tool()],
             observer=obs,
@@ -273,7 +273,7 @@ async def test_observer_async_loop_awaits_async_hooks() -> None:
     async with make_async_client(handler) as client:
         await arun_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[_echo_tool()],
             observer=AsyncObs(),
@@ -321,7 +321,7 @@ async def test_observer_parallel_tool_calls_fire_start_and_finished_per_tool() -
     async with make_async_client(handler) as client:
         await arun_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[_echo_tool()],
             observer=obs,
@@ -365,7 +365,7 @@ def test_observer_compaction_fires_only_when_payload_changes() -> None:
     with make_sync_client(handler) as client:
         run_tools(
             client,
-            model=Model.KIMI_K2_0905_PREVIEW,
+            model=Model.MOONSHOT_V1_128K,
             messages=[{"role": "user", "content": "?"}],
             tools=[_echo_tool()],
             compactor=compactor,
@@ -393,7 +393,7 @@ def test_token_budget_error_carries_usage_and_transcript() -> None:
         with pytest.raises(TokenBudgetExceededError) as ei:
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[_echo_tool()],
                 max_steps=10,
@@ -416,7 +416,7 @@ def test_repeat_threshold_error_carries_partial_transcript() -> None:
         with pytest.raises(RepeatedToolCallError) as ei:
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[_echo_tool()],
                 max_steps=10,
@@ -439,7 +439,7 @@ def test_read_only_streak_error_carries_partial_state() -> None:
         with pytest.raises(ReadOnlyStreakExceededError) as ei:
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[_readonly_tool()],
                 max_steps=10,
@@ -461,7 +461,7 @@ def test_max_steps_exhaustion_carries_partial_state() -> None:
         with pytest.raises(KimiToolLoopError) as ei:
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[_echo_tool()],
                 max_steps=2,
@@ -486,7 +486,7 @@ async def test_graceful_caps_max_steps_returns_truncated_result() -> None:
 
     agent = KimiAgent(
         name="builder",
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.MOONSHOT_V1_128K,
         tools=[_echo_tool()],
         max_steps=2,
         graceful_caps=True,
@@ -512,7 +512,7 @@ async def test_graceful_caps_token_budget_returns_truncated_result() -> None:
 
     agent = KimiAgent(
         name="builder",
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.MOONSHOT_V1_128K,
         tools=[_echo_tool()],
         max_steps=10,
         guards=LoopGuards(max_tokens=500),
@@ -532,7 +532,7 @@ async def test_graceful_caps_off_still_raises() -> None:
 
     agent = KimiAgent(
         name="builder",
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.MOONSHOT_V1_128K,
         tools=[_echo_tool()],
         max_steps=2,
         graceful_caps=False,
@@ -575,7 +575,7 @@ def test_async_observer_passed_to_sync_loop_raises_typeerror() -> None:
         with pytest.raises(TypeError, match="async"):
             run_tools(
                 client,
-                model=Model.KIMI_K2_0905_PREVIEW,
+                model=Model.MOONSHOT_V1_128K,
                 messages=[{"role": "user", "content": "?"}],
                 tools=[_echo_tool()],
                 observer=BadObs(),
@@ -596,7 +596,7 @@ async def test_graceful_caps_clean_run_reports_truncated_false() -> None:
 
     agent = KimiAgent(
         name="builder",
-        model=Model.KIMI_K2_0905_PREVIEW,
+        model=Model.MOONSHOT_V1_128K,
         tools=[_echo_tool()],
         max_steps=10,
         graceful_caps=True,

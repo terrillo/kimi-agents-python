@@ -32,7 +32,7 @@ TOOLS = [
 
 
 with KimiClient() as client:
-    sess = Session(client, model=Model.KIMI_K2_0905_PREVIEW, tools=TOOLS)
+    sess = Session(client, model=Model.KIMI_K2_6, tools=TOOLS)
     first = sess.send("What's the weather in Tokyo?")
 
     if not first.tool_calls:
